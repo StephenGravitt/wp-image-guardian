@@ -29,11 +29,16 @@ jQuery(document).ready(function($) {
             button.removeClass('checking');
             
             if (response.success) {
-                button.text(wpImageGuardian.strings.checked);
+                button.text(wpImageGuardian.strings.safe);
                 button.addClass('checked');
                 
                 // Update status display
                 updateImageStatus(attachmentId, response.data);
+                
+                // Reload page to show updated status
+                setTimeout(function() {
+                    location.reload();
+                }, 1000);
             } else {
                 button.text(wpImageGuardian.strings.error);
                 alert('Error: ' + response.data);

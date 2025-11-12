@@ -59,9 +59,18 @@ class WP_Image_Guardian_Media {
         $status_text = $this->get_status_text($risk_level, $user_decision);
         $status_icon = $this->get_status_icon($risk_level, $user_decision);
         
-        $html = '<div class="wp-image-guardian-status ' . $status_class . '">';
+        $html = '<div class="wp-image-guardian-status ' . $status_class . '" data-attachment-id="' . $attachment_id . '">';
         $html .= '<span class="status-icon">' . $status_icon . '</span>';
         $html .= '<span class="status-text">' . $status_text . '</span>';
+        
+        // Add Check Image button if not checked yet
+        if ($risk_level === 'unknown') {
+            $html .= '<div class="status-actions">';
+            $html .= '<button type="button" class="button button-small wp-image-guardian-check-image" data-attachment-id="' . $attachment_id . '">';
+            $html .= __('Check Image', 'wp-image-guardian');
+            $html .= '</button>';
+            $html .= '</div>';
+        }
         
         if ($risk_level !== 'unknown' && !$user_decision) {
             $html .= '<div class="status-actions">';
@@ -79,6 +88,9 @@ class WP_Image_Guardian_Media {
             $html .= '<button type="button" class="button button-small view-results" data-attachment-id="' . $attachment_id . '">';
             $html .= __('View Results', 'wp-image-guardian');
             $html .= '</button>';
+            $html .= '<button type="button" class="button button-small wp-image-guardian-check-image" data-attachment-id="' . $attachment_id . '">';
+            $html .= __('Re-check Image', 'wp-image-guardian');
+            $html .= '</button>';
             $html .= '</div>';
         }
         
@@ -90,6 +102,13 @@ class WP_Image_Guardian_Media {
     private function get_results_html($attachment_id, $check_status) {
         $results_data = json_decode($check_status->results_data, true);
         $total_results = $results_data['total_results'] ?? 0;
+        
+        // Apply filter to allow modification of results display
+        $display_html = apply_filters('wp_image_guardian_results_display', '', $attachment_id, $check_status, $results_data);
+        
+        if (!empty($display_html)) {
+            return $display_html;
+        }
         
         $html = '<div class="wp-image-guardian-results">';
         $html .= '<p><strong>' . sprintf(__('Found %d similar images', 'wp-image-guardian'), $total_results) . '</strong></p>';

@@ -1,0 +1,148 @@
+name: Build Plugin (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version number (overrides plugin file version)'
+        required: false
+        type: string
+      version_suffix:
+        description: 'Suffix to append to version (e.g., -nightly-20241112)'
+        required: false
+        type: string
+      include_docs:
+        description: 'Include documentation in minimal build'
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      version:
+        description: 'Final version string'
+        value: ${{ jobs.build.outputs.version }}
+      zip_file:
+        description: 'Path to zip file'
+        value: ${{ jobs.build.outputs.zip_file }}
+      zip_file_full:
+        description: 'Path to full zip file'
+        value: ${{ jobs.build.outputs.zip_file_full }}
+
+jobs:
+  build:
+    name: Build WordPress Plugin
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.final_version }}
+      zip_file: ${{ steps.create_zip.outputs.zip_file }}
+      zip_file_full: ${{ steps.create_zip.outputs.zip_file_full }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Find plugin file
+        id: find_plugin
+        run: |
+          if [ -f "wp-image-guardian.php" ]; then
+            PLUGIN_FILE="wp-image-guardian.php"
+            PLUGIN_DIR="."
+          elif [ -f "wp-plugin/wp-image-guardian.php" ]; then
+            PLUGIN_FILE="wp-plugin/wp-image-guardian.php"
+            PLUGIN_DIR="wp-plugin"
+          else
+            echo "Error: Could not find wp-image-guardian.php"
+            exit 1
+          fi
+          
+          echo "plugin_file=$PLUGIN_FILE" >> $GITHUB_OUTPUT
+          echo "plugin_dir=$PLUGIN_DIR" >> $GITHUB_OUTPUT
+      
+      - name: Get version from plugin file
+        id: get_version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            BASE_VERSION="${{ inputs.version }}"
+          else
+            BASE_VERSION=$(grep "Version:" "${{ steps.find_plugin.outputs.plugin_file }}" | sed 's/.*Version: *\([0-9.]*\).*/\1/' | tr -d ' ')
+          fi
+          
+          if [ -n "${{ inputs.version_suffix }}" ]; then
+            FINAL_VERSION="${BASE_VERSION}${{ inputs.version_suffix }}"
+          else
+            FINAL_VERSION="$BASE_VERSION"
+          fi
+          
+          GIT_HASH=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date +'%Y%m%d')
+          
+          echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
+          echo "final_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
+          echo "git_hash=$GIT_HASH" >> $GITHUB_OUTPUT
+          echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+      
+      - name: Create plugin directory structure
+        run: |
+          mkdir -p build/wp-image-guardian
+      
+      - name: Copy plugin files
+        run: |
+          # Copy all plugin files (excluding .git, .github, build directories)
+          if [ "${{ steps.find_plugin.outputs.plugin_dir }}" = "." ]; then
+            # Plugin files are in root
+            rsync -av --exclude='.git' --exclude='.github' --exclude='build' --exclude='.gitignore' \
+              --exclude='BUILD.md' --exclude='INSTALLATION.md' \
+              ./ build/wp-image-guardian/
+          else
+            # Plugin files are in subdirectory
+            rsync -av --exclude='.git' --exclude='.github' --exclude='build' --exclude='.gitignore' \
+              --exclude='BUILD.md' --exclude='INSTALLATION.md' \
+              "${{ steps.find_plugin.outputs.plugin_dir }}/" build/wp-image-guardian/
+          fi
+          
+          # Update version in plugin file
+          sed -i "s/Version: .*/Version: ${{ steps.get_version.outputs.final_version }}/" build/wp-image-guardian/wp-image-guardian.php
+      
+      - name: Create zip file (minimal)
+        id: create_zip
+        run: |
+          cd build
+          
+          # Create minimal zip (without documentation)
+          ZIP_FILE="wp-image-guardian-${{ steps.get_version.outputs.final_version }}.zip"
+          zip -r "$ZIP_FILE" wp-image-guardian/ \
+            -x "*.git*" \
+            -x "*.DS_Store" \
+            -x "*node_modules/*" \
+            -x "*.log" \
+            -x "INSTALLATION.md" \
+            -x "BUILD.md" \
+            -x "BUILD.txt"
+          
+          # Create full zip (with documentation)
+          ZIP_FILE_FULL="wp-image-guardian-${{ steps.get_version.outputs.final_version }}-full.zip"
+          zip -r "$ZIP_FILE_FULL" wp-image-guardian/ \
+            -x "*.git*" \
+            -x "*.DS_Store" \
+            -x "*node_modules/*" \
+            -x "*.log" \
+            -x "BUILD.txt"
+          
+          # Generate checksums
+          sha256sum wp-image-guardian-*.zip > checksums.txt
+          md5sum wp-image-guardian-*.zip >> checksums.txt
+          
+          echo "zip_file=$ZIP_FILE" >> $GITHUB_OUTPUT
+          echo "zip_file_full=$ZIP_FILE_FULL" >> $GITHUB_OUTPUT
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wp-image-guardian-${{ steps.get_version.outputs.final_version }}
+          path: |
+            build/wp-image-guardian-${{ steps.get_version.outputs.final_version }}.zip
+            build/wp-image-guardian-${{ steps.get_version.outputs.final_version }}-full.zip
+            build/checksums.txt
+          retention-days: 30
+

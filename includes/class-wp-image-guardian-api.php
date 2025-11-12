@@ -45,15 +45,18 @@ class WP_Image_Guardian_API {
             ];
         }
         
+        // Apply filter to allow modification of check parameters
+        $check_params = apply_filters('wp_image_guardian_check_image', [
+            'image_url' => $image_url,
+            'tinyeye_api_key' => $tinyeye_api_key,
+        ], $image_url);
+        
         $response = wp_remote_post($this->api_base_url . '/plugin/search', [
             'headers' => [
-                'X-API-Key' => $this->get_api_key(),
+                'Authorization' => 'Bearer ' . $access_token,
                 'Content-Type' => 'application/json',
             ],
-            'body' => json_encode([
-                'image_url' => $image_url,
-                'tinyeye_api_key' => $tinyeye_api_key,
-            ]),
+            'body' => json_encode($check_params),
             'timeout' => 60, // Longer timeout for image search
         ]);
         
@@ -98,7 +101,7 @@ class WP_Image_Guardian_API {
         
         $response = wp_remote_get($this->api_base_url . '/plugin/status', [
             'headers' => [
-                'X-API-Key' => $this->get_api_key(),
+                'Authorization' => 'Bearer ' . $access_token,
                 'Content-Type' => 'application/json',
             ],
             'timeout' => 30,
@@ -221,23 +224,6 @@ class WP_Image_Guardian_API {
         ];
     }
     
-    private function get_api_key() {
-        // For now, we'll use a placeholder. In a real implementation,
-        // this would be generated when the user connects their account
-        $api_key = get_option('wp_image_guardian_api_key');
-        
-        if (!$api_key) {
-            // Generate a new API key for this site
-            $api_key = $this->generate_api_key();
-            update_option('wp_image_guardian_api_key', $api_key);
-        }
-        
-        return $api_key;
-    }
-    
-    private function generate_api_key() {
-        return 'wp_' . wp_generate_password(40, false);
-    }
     
     public function register_domain() {
         if (!$this->oauth->is_connected()) {

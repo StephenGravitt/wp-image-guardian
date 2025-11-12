@@ -25,7 +25,9 @@ define('WP_IMAGE_GUARDIAN_VERSION', '1.0.0');
 define('WP_IMAGE_GUARDIAN_PLUGIN_FILE', __FILE__);
 define('WP_IMAGE_GUARDIAN_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_IMAGE_GUARDIAN_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('WP_IMAGE_GUARDIAN_API_BASE_URL', 'https://your-api-domain.com/api/v1');
+// Default API base URL - should be configured in settings
+// Users must set their actual API endpoint in the plugin settings
+define('WP_IMAGE_GUARDIAN_API_BASE_URL', '');
 
 // Include required files
 require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian.php';
@@ -48,6 +50,11 @@ add_action('plugins_loaded', 'wp_image_guardian_init');
 // Activation hook
 register_activation_hook(__FILE__, 'wp_image_guardian_activate');
 function wp_image_guardian_activate() {
+    // Ensure classes are loaded
+    if (!class_exists('WP_Image_Guardian_Database')) {
+        require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-database.php';
+    }
+    
     $database = new WP_Image_Guardian_Database();
     $database->create_tables();
     
@@ -73,6 +80,11 @@ function wp_image_guardian_deactivate() {
 // Uninstall hook
 register_uninstall_hook(__FILE__, 'wp_image_guardian_uninstall');
 function wp_image_guardian_uninstall() {
+    // Ensure classes are loaded
+    if (!class_exists('WP_Image_Guardian_Database')) {
+        require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-database.php';
+    }
+    
     $database = new WP_Image_Guardian_Database();
     $database->drop_tables();
     
@@ -80,4 +92,7 @@ function wp_image_guardian_uninstall() {
     delete_option('wp_image_guardian_version');
     delete_option('wp_image_guardian_settings');
     delete_option('wp_image_guardian_oauth_tokens');
+    delete_option('wp_image_guardian_user_info');
+    delete_option('wp_image_guardian_domain_approved');
+    delete_option('wp_image_guardian_auto_check');
 }

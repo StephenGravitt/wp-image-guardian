@@ -43,13 +43,14 @@ class WP_Image_Guardian {
         add_action('wp_ajax_wp_image_guardian_mark_safe', [$this, 'ajax_mark_safe']);
         add_action('wp_ajax_wp_image_guardian_mark_unsafe', [$this, 'ajax_mark_unsafe']);
         add_action('wp_ajax_wp_image_guardian_oauth_callback', [$this, 'ajax_oauth_callback']);
-        
-        // Premium features
+        add_action('wp_ajax_wp_image_guardian_disconnect', [$this, 'ajax_disconnect']);
+        add_action('wp_ajax_wp_image_guardian_get_usage_stats', [$this, 'ajax_get_usage_stats']);
         add_action('wp_ajax_wp_image_guardian_bulk_check', [$this, 'ajax_bulk_check']);
         add_action('wp_ajax_wp_image_guardian_auto_check', [$this, 'ajax_auto_check']);
         
         // Scheduled events for premium features
         add_action('wp_image_guardian_check_new_uploads', [$this, 'check_new_uploads']);
+        add_action('wp_image_guardian_check_single_upload', [$this, 'check_single_upload']);
         
         // Hook into media uploads for premium users
         add_action('add_attachment', [$this, 'handle_new_upload']);
@@ -120,6 +121,10 @@ class WP_Image_Guardian {
         if ($result['success']) {
             // Store the result in database
             $this->database->store_image_check($attachment_id, $result['data']);
+            
+            // Fire action hook
+            do_action('wp_image_guardian_image_checked', $attachment_id, $result['data']);
+            
             wp_send_json_success($result['data']);
         } else {
             wp_send_json_error($result['message']);
@@ -149,6 +154,9 @@ class WP_Image_Guardian {
         $attachment_id = intval($_POST['attachment_id']);
         $this->database->mark_image_safe($attachment_id);
         
+        // Fire action hook
+        do_action('wp_image_guardian_image_marked_safe', $attachment_id);
+        
         wp_send_json_success(__('Image marked as safe', 'wp-image-guardian'));
     }
     
@@ -161,6 +169,9 @@ class WP_Image_Guardian {
         
         $attachment_id = intval($_POST['attachment_id']);
         $this->database->mark_image_unsafe($attachment_id);
+        
+        // Fire action hook
+        do_action('wp_image_guardian_image_marked_unsafe', $attachment_id);
         
         wp_send_json_success(__('Image marked as unsafe', 'wp-image-guardian'));
     }
@@ -179,6 +190,34 @@ class WP_Image_Guardian {
         exit;
     }
     
+    public function ajax_disconnect() {
+        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+        }
+        
+        $this->oauth->disconnect();
+        
+        wp_send_json_success(__('Disconnected from Image Guardian', 'wp-image-guardian'));
+    }
+    
+    public function ajax_get_usage_stats() {
+        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
+        
+        if (!current_user_can('upload_files')) {
+            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+        }
+        
+        $usage_stats = $this->api->get_usage_stats();
+        
+        if ($usage_stats['success']) {
+            wp_send_json_success($usage_stats['data']);
+        } else {
+            wp_send_json_error($usage_stats['message']);
+        }
+    }
+    
     public function ajax_bulk_check() {
         check_ajax_referer('wp_image_guardian_nonce', 'nonce');
         
@@ -195,6 +234,8 @@ class WP_Image_Guardian {
                 $result = $this->api->check_image($image_url);
                 if ($result['success']) {
                     $this->database->store_image_check($attachment_id, $result['data']);
+                    // Fire action hook
+                    do_action('wp_image_guardian_image_checked', $attachment_id, $result['data']);
                     $results[] = ['id' => $attachment_id, 'status' => 'checked'];
                 } else {
                     $results[] = ['id' => $attachment_id, 'status' => 'error', 'message' => $result['message']];
@@ -224,6 +265,27 @@ class WP_Image_Guardian {
         wp_send_json_success(__('Auto-check settings updated', 'wp-image-guardian'));
     }
     
+    public function check_single_upload($attachment_id) {
+        if (!$this->premium->is_premium_user()) {
+            return;
+        }
+        
+        $auto_check = get_option('wp_image_guardian_auto_check', false);
+        if (!$auto_check) {
+            return;
+        }
+        
+        $image_url = wp_get_attachment_url($attachment_id);
+        if ($image_url) {
+            $result = $this->api->check_image($image_url);
+            if ($result['success']) {
+                $this->database->store_image_check($attachment_id, $result['data']);
+                // Fire action hook
+                do_action('wp_image_guardian_image_checked', $attachment_id, $result['data']);
+            }
+        }
+    }
+    
     public function check_new_uploads() {
         if (!$this->premium->is_premium_user()) {
             return;
@@ -243,6 +305,8 @@ class WP_Image_Guardian {
                 $result = $this->api->check_image($image_url);
                 if ($result['success']) {
                     $this->database->store_image_check($image->ID, $result['data']);
+                    // Fire action hook
+                    do_action('wp_image_guardian_image_checked', $image->ID, $result['data']);
                 }
             }
         }

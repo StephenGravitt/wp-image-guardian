@@ -16,7 +16,7 @@ class WP_Image_Guardian_Premium {
     
     public function init() {
         add_action('admin_menu', [$this, 'add_premium_menu']);
-        add_action('wp_ajax_wp_image_guardian_bulk_check', [$this, 'handle_bulk_check']);
+        // Note: wp_image_guardian_bulk_check is handled in main class
         add_action('wp_ajax_wp_image_guardian_auto_check_toggle', [$this, 'handle_auto_check_toggle']);
     }
     
@@ -110,39 +110,6 @@ class WP_Image_Guardian_Premium {
         include WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'templates/auto-check-page.php';
     }
     
-    public function handle_bulk_check() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('upload_files') || !$this->is_premium_user()) {
-            wp_die(__('Premium feature - upgrade required', 'wp-image-guardian'));
-        }
-        
-        $attachment_ids = array_map('intval', $_POST['attachment_ids']);
-        $results = [];
-        
-        foreach ($attachment_ids as $attachment_id) {
-            $image_url = wp_get_attachment_url($attachment_id);
-            if ($image_url) {
-                $result = $this->api->check_image($image_url);
-                if ($result['success']) {
-                    $this->database->store_image_check($attachment_id, $result['data']);
-                    $results[] = [
-                        'id' => $attachment_id,
-                        'status' => 'checked',
-                        'risk_level' => $this->calculate_risk_level($result['data'])
-                    ];
-                } else {
-                    $results[] = [
-                        'id' => $attachment_id,
-                        'status' => 'error',
-                        'message' => $result['message']
-                    ];
-                }
-            }
-        }
-        
-        wp_send_json_success($results);
-    }
     
     public function handle_auto_check_toggle() {
         check_ajax_referer('wp_image_guardian_nonce', 'nonce');

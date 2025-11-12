@@ -217,13 +217,17 @@ class WP_Image_Guardian_Database {
     private function calculate_risk_level($results) {
         $total_results = $results['total_results'] ?? 0;
         
+        $risk_level = 'unknown';
         if ($total_results === 0) {
-            return 'safe';
+            $risk_level = 'safe';
         } elseif ($total_results <= 3) {
-            return 'warning';
+            $risk_level = 'warning';
         } else {
-            return 'danger';
+            $risk_level = 'danger';
         }
+        
+        // Apply filter to allow modification of risk level
+        return apply_filters('wp_image_guardian_risk_level', $risk_level, $results, $total_results);
     }
     
     public function cleanup_old_checks($days = 90) {

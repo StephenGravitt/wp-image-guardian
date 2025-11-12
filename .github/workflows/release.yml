@@ -1,0 +1,112 @@
+name: Release Plugin Build
+
+on:
+  release:
+    types: [published, created]
+
+jobs:
+  build:
+    name: Build and Attach to Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Extract version from tag
+        id: extract_version
+        run: |
+          # Remove 'v' prefix if present
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          VERSION="${TAG_NAME#v}"
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+      
+      - name: Find plugin file
+        id: find_plugin
+        run: |
+          if [ -f "wp-image-guardian.php" ]; then
+            PLUGIN_FILE="wp-image-guardian.php"
+            PLUGIN_DIR="."
+          elif [ -f "wp-plugin/wp-image-guardian.php" ]; then
+            PLUGIN_FILE="wp-plugin/wp-image-guardian.php"
+            PLUGIN_DIR="wp-plugin"
+          else
+            echo "Error: Could not find wp-image-guardian.php"
+            exit 1
+          fi
+          
+          echo "plugin_file=$PLUGIN_FILE" >> $GITHUB_OUTPUT
+          echo "plugin_dir=$PLUGIN_DIR" >> $GITHUB_OUTPUT
+      
+      - name: Create plugin directory structure
+        run: |
+          mkdir -p build/wp-image-guardian
+      
+      - name: Copy plugin files
+        run: |
+          # Copy all plugin files (excluding .git, .github, build directories)
+          if [ "${{ steps.find_plugin.outputs.plugin_dir }}" = "." ]; then
+            # Plugin files are in root
+            rsync -av --exclude='.git' --exclude='.github' --exclude='build' --exclude='.gitignore' \
+              --exclude='BUILD.md' --exclude='INSTALLATION.md' \
+              ./ build/wp-image-guardian/
+          else
+            # Plugin files are in subdirectory
+            rsync -av --exclude='.git' --exclude='.github' --exclude='build' --exclude='.gitignore' \
+              --exclude='BUILD.md' --exclude='INSTALLATION.md' \
+              "${{ steps.find_plugin.outputs.plugin_dir }}/" build/wp-image-guardian/
+          fi
+          
+          # Update version in plugin file
+          sed -i "s/Version: .*/Version: ${{ steps.extract_version.outputs.version }}/" build/wp-image-guardian/wp-image-guardian.php
+      
+      - name: Create zip file (minimal)
+        run: |
+          cd build
+          
+          # Create minimal zip (without documentation)
+          zip -r wp-image-guardian-${{ steps.extract_version.outputs.version }}.zip wp-image-guardian/ \
+            -x "*.git*" \
+            -x "*.DS_Store" \
+            -x "*node_modules/*" \
+            -x "*.log" \
+            -x "INSTALLATION.md" \
+            -x "BUILD.md" \
+            -x "BUILD.txt"
+      
+      - name: Create zip file (full)
+        run: |
+          cd build
+          
+          # Create full zip (with documentation)
+          zip -r wp-image-guardian-${{ steps.extract_version.outputs.version }}-full.zip wp-image-guardian/ \
+            -x "*.git*" \
+            -x "*.DS_Store" \
+            -x "*node_modules/*" \
+            -x "*.log" \
+            -x "BUILD.txt"
+      
+      - name: Generate checksums
+        run: |
+          cd build
+          sha256sum wp-image-guardian-*.zip > checksums.txt
+          md5sum wp-image-guardian-*.zip >> checksums.txt
+      
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/wp-image-guardian-${{ steps.extract_version.outputs.version }}.zip
+            build/wp-image-guardian-${{ steps.extract_version.outputs.version }}-full.zip
+            build/checksums.txt
+          draft: false
+          prerelease: ${{ github.event.release.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
