@@ -11,8 +11,7 @@ class WP_Image_Guardian_API {
     
     public function __construct() {
         $this->oauth = new WP_Image_Guardian_OAuth();
-        $settings = get_option('wp_image_guardian_settings', []);
-        $this->api_base_url = $settings['api_base_url'] ?? WP_IMAGE_GUARDIAN_API_BASE_URL;
+        $this->api_base_url = WP_IMAGE_GUARDIAN_API_BASE_URL;
     }
     
     public function init() {

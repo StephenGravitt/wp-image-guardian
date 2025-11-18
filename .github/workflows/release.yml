@@ -66,10 +66,26 @@ jobs:
           # Update version in plugin file
           sed -i "s/Version: .*/Version: ${{ steps.extract_version.outputs.version }}/" build/wp-image-guardian/wp-image-guardian.php
       
+      - name: Validate plugin structure
+        run: |
+          cd build/wp-image-guardian
+          # Verify main plugin file exists and has valid header
+          if [ ! -f "wp-image-guardian.php" ]; then
+            echo "Error: wp-image-guardian.php not found!"
+            exit 1
+          fi
+          # Verify plugin header
+          if ! grep -q "Plugin Name:" wp-image-guardian.php; then
+            echo "Error: Invalid plugin header!"
+            exit 1
+          fi
+          echo "Plugin structure validated successfully"
+      
       - name: Create zip file (minimal)
         run: |
           cd build
-          
+          # Remove build artifacts before zipping
+          rm -f wp-image-guardian/BUILD.txt wp-image-guardian/BUILD.md wp-image-guardian/INSTALLATION.md 2>/dev/null || true
           # Create minimal zip (without documentation)
           zip -r wp-image-guardian-${{ steps.extract_version.outputs.version }}.zip wp-image-guardian/ \
             -x "*.git*" \
@@ -79,18 +95,27 @@ jobs:
             -x "INSTALLATION.md" \
             -x "BUILD.md" \
             -x "BUILD.txt"
+          
+          # Verify zip was created and contains plugin file
+          if ! unzip -l wp-image-guardian-${{ steps.extract_version.outputs.version }}.zip | grep -q "wp-image-guardian/wp-image-guardian.php"; then
+            echo "Error: Plugin file not found in zip!"
+            exit 1
+          fi
+          echo "Zip file created and validated successfully"
       
       - name: Create zip file (full)
         run: |
           cd build
-          
+          # Remove build artifacts before zipping (full version keeps README.md)
+          rm -f wp-image-guardian/BUILD.txt wp-image-guardian/BUILD.md 2>/dev/null || true
           # Create full zip (with documentation)
           zip -r wp-image-guardian-${{ steps.extract_version.outputs.version }}-full.zip wp-image-guardian/ \
             -x "*.git*" \
             -x "*.DS_Store" \
             -x "*node_modules/*" \
             -x "*.log" \
-            -x "BUILD.txt"
+            -x "BUILD.txt" \
+            -x "BUILD.md"
       
       - name: Generate checksums
         run: |

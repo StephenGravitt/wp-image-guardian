@@ -1,8 +1,57 @@
 # Building the Plugin
 
-This repository includes GitHub Actions workflows for automated builds.
+This repository includes both local build scripts and GitHub Actions workflows for automated builds.
 
-## Available Workflows
+## Local Build Script
+
+### Quick Start
+
+The easiest way to build the plugin locally:
+
+```bash
+./build-plugin.sh
+```
+
+The script will:
+- Extract the version from the plugin file
+- Prompt you for the output directory (defaults to current directory)
+- Warn if files will be overwritten
+- Let you choose minimal, full, or both zip files
+- Validate the plugin structure
+- Generate checksums
+
+### Build Options
+
+1. **Minimal Build** (Recommended for WordPress)
+   - Plugin files only
+   - Excludes documentation
+   - Smaller file size
+   - Ready for WordPress installation
+
+2. **Full Build**
+   - Includes README.md and documentation
+   - Larger file size
+   - Good for distribution
+
+3. **Both**
+   - Creates both minimal and full versions
+
+### Example Usage
+
+```bash
+# Build in current directory (default)
+./build-plugin.sh
+
+# Build in Downloads folder
+./build-plugin.sh
+# Then enter: ~/Downloads
+
+# Build in custom location
+./build-plugin.sh
+# Then enter: /path/to/output
+```
+
+## GitHub Actions Workflows
 
 ### 1. Release Build (`release.yml`)
 **Triggers:** When a GitHub release is created or published
@@ -17,18 +66,7 @@ Automatically builds and attaches zip files to releases:
 1. Create a new release in GitHub (with tag like `v1.0.0` or `1.0.0`)
 2. The workflow automatically runs and attaches the zip files
 
-### 2. Nightly Build (`nightly-build.yml`)
-**Triggers:**
-- Scheduled: Every night at 2:00 AM UTC
-- Manual: Can be triggered from Actions tab
-- Push: On pushes to main/master branch (when plugin files change)
-
-Creates nightly development builds:
-- Version format: `{base-version}-nightly-{date}-{git-hash}`
-- Uploads as GitHub Actions artifacts
-- Creates a pre-release on main/master branch
-
-### 3. Manual Build (`manual-build.yml`)
+### 2. Manual Build (`manual-build.yml`)
 **Triggers:** Manual trigger from Actions tab
 
 Allows on-demand builds:
@@ -36,7 +74,7 @@ Allows on-demand builds:
 - Optionally create a GitHub release
 - Useful for testing or creating custom builds
 
-### 4. Reusable Build (`build-plugin.yml`)
+### 3. Reusable Build (`build-plugin.yml`)
 **Status:** Available for future use as a reusable workflow
 
 A reusable workflow that can be called by other workflows to keep code DRY.

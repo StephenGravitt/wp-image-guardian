@@ -5,6 +5,10 @@ build/
 *.zip
 *.tar.gz
 
+# Generated zip files (from build script)
+wp-image-guardian-*.zip
+checksums.txt
+
 # OS files
 .DS_Store
 .DS_Store?

@@ -51,19 +51,57 @@ class WP_Image_Guardian_Database {
     public function store_image_check($attachment_id, $results) {
         global $wpdb;
         
+        // Validate attachment ID
+        $attachment_id = absint($attachment_id);
+        if ($attachment_id <= 0) {
+            return false;
+        }
+        
+        // Validate results is an array
+        if (!is_array($results)) {
+            return false;
+        }
+        
         $image_url = wp_get_attachment_url($attachment_id);
+        if (!$image_url) {
+            return false;
+        }
+        
+        // Sanitize image URL
+        $image_url = esc_url_raw($image_url);
         $image_hash = $this->generate_image_hash($image_url);
         
         $risk_level = $this->calculate_risk_level($results);
+        
+        // Validate risk level
+        $allowed_risk_levels = ['safe', 'warning', 'danger', 'unknown'];
+        if (!in_array($risk_level, $allowed_risk_levels, true)) {
+            $risk_level = 'unknown';
+        }
+        
+        // Sanitize search_id
+        $search_id = isset($results['search_id']) ? sanitize_text_field($results['search_id']) : null;
+        if ($search_id && strlen($search_id) > 100) {
+            $search_id = substr($search_id, 0, 100);
+        }
+        
+        // Validate and sanitize results_count
+        $results_count = isset($results['total_results']) ? absint($results['total_results']) : 0;
+        
+        // Sanitize JSON data
+        $results_data = wp_json_encode($results, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($results_data === false) {
+            $results_data = '{}';
+        }
         
         $data = [
             'attachment_id' => $attachment_id,
             'image_url' => $image_url,
             'image_hash' => $image_hash,
-            'search_id' => $results['search_id'] ?? null,
+            'search_id' => $search_id,
             'status' => 'completed',
-            'results_count' => $results['total_results'] ?? 0,
-            'results_data' => json_encode($results),
+            'results_count' => $results_count,
+            'results_data' => $results_data,
             'risk_level' => $risk_level,
             'checked_at' => current_time('mysql'),
         ];
@@ -74,17 +112,17 @@ class WP_Image_Guardian_Database {
         ));
         
         if ($existing) {
-            $wpdb->update(
+            $updated = $wpdb->update(
                 $this->table_name,
                 $data,
                 ['attachment_id' => $attachment_id],
                 ['%d', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s'],
                 ['%d']
             );
-            return $existing->id;
+            return $updated !== false ? $existing->id : false;
         } else {
-            $wpdb->insert($this->table_name, $data);
-            return $wpdb->insert_id;
+            $inserted = $wpdb->insert($this->table_name, $data, ['%d', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s']);
+            return $inserted !== false ? $wpdb->insert_id : false;
         }
     }
     
@@ -117,17 +155,29 @@ class WP_Image_Guardian_Database {
     public function mark_image_safe($attachment_id) {
         global $wpdb;
         
+        // Validate attachment ID
+        $attachment_id = absint($attachment_id);
+        if ($attachment_id <= 0) {
+            return false;
+        }
+        
         return $wpdb->update(
             $this->table_name,
             ['user_decision' => 'safe', 'updated_at' => current_time('mysql')],
             ['attachment_id' => $attachment_id],
             ['%s', '%s'],
             ['%d']
-        );
+        ) !== false;
     }
     
     public function mark_image_unsafe($attachment_id) {
         global $wpdb;
+        
+        // Validate attachment ID
+        $attachment_id = absint($attachment_id);
+        if ($attachment_id <= 0) {
+            return false;
+        }
         
         return $wpdb->update(
             $this->table_name,
@@ -135,11 +185,17 @@ class WP_Image_Guardian_Database {
             ['attachment_id' => $attachment_id],
             ['%s', '%s'],
             ['%d']
-        );
+        ) !== false;
     }
     
     public function get_unchecked_images($hours = 24) {
         global $wpdb;
+        
+        // Validate and sanitize hours parameter
+        $hours = absint($hours);
+        if ($hours <= 0 || $hours > 8760) { // Max 1 year
+            $hours = 24;
+        }
         
         $date = date('Y-m-d H:i:s', strtotime("-{$hours} hours"));
         
@@ -148,16 +204,29 @@ class WP_Image_Guardian_Database {
              FROM {$wpdb->posts} p 
              LEFT JOIN {$this->table_name} ig ON p.ID = ig.attachment_id 
              WHERE p.post_type = 'attachment' 
-             AND p.post_mime_type LIKE 'image/%' 
+             AND p.post_mime_type LIKE %s 
              AND p.post_date >= %s 
              AND ig.id IS NULL 
              ORDER BY p.post_date DESC",
+            'image/%',
             $date
         ));
     }
     
     public function get_checked_images($limit = 50, $offset = 0) {
         global $wpdb;
+        
+        // Validate and sanitize limit and offset
+        $limit = absint($limit);
+        $offset = absint($offset);
+        
+        // Prevent excessive queries
+        if ($limit > 1000) {
+            $limit = 1000;
+        }
+        if ($offset > 10000) {
+            $offset = 10000;
+        }
         
         return $wpdb->get_results($wpdb->prepare(
             "SELECT ig.*, p.post_title, p.post_date 
@@ -198,6 +267,12 @@ class WP_Image_Guardian_Database {
     
     public function get_recent_checks($limit = 10) {
         global $wpdb;
+        
+        // Validate and sanitize limit
+        $limit = absint($limit);
+        if ($limit <= 0 || $limit > 100) {
+            $limit = 10;
+        }
         
         return $wpdb->get_results($wpdb->prepare(
             "SELECT ig.*, p.post_title, p.guid 
@@ -242,17 +317,30 @@ class WP_Image_Guardian_Database {
     }
     
     public function get_attachment_checks($attachment_ids) {
-        if (empty($attachment_ids)) {
+        if (empty($attachment_ids) || !is_array($attachment_ids)) {
             return [];
         }
         
         global $wpdb;
         
+        // Sanitize all attachment IDs
+        $attachment_ids = array_map('absint', $attachment_ids);
+        $attachment_ids = array_filter($attachment_ids, function($id) {
+            return $id > 0;
+        });
+        
+        if (empty($attachment_ids)) {
+            return [];
+        }
+        
+        // Limit to prevent excessive queries
+        $attachment_ids = array_slice($attachment_ids, 0, 100);
+        
         $placeholders = implode(',', array_fill(0, count($attachment_ids), '%d'));
         
         return $wpdb->get_results($wpdb->prepare(
             "SELECT * FROM {$this->table_name} WHERE attachment_id IN ($placeholders)",
-            $attachment_ids
+            ...$attachment_ids
         ));
     }
 }

@@ -25,9 +25,14 @@ define('WP_IMAGE_GUARDIAN_VERSION', '1.0.0');
 define('WP_IMAGE_GUARDIAN_PLUGIN_FILE', __FILE__);
 define('WP_IMAGE_GUARDIAN_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_IMAGE_GUARDIAN_PLUGIN_URL', plugin_dir_url(__FILE__));
-// Default API base URL - should be configured in settings
-// Users must set their actual API endpoint in the plugin settings
-define('WP_IMAGE_GUARDIAN_API_BASE_URL', '');
+// API base URL - must be set to your Image Guardian API service
+// Default is Lando local development URL (http://image-guardian.lndo.site)
+// To override, define this constant in wp-config.php before the plugin loads
+// Note: If your Laravel API routes are under /api prefix, you may need to adjust
+// the endpoint paths in the API class, or set this to include /api if all routes are there
+if (!defined('WP_IMAGE_GUARDIAN_API_BASE_URL')) {
+    define('WP_IMAGE_GUARDIAN_API_BASE_URL', 'https://image-guardian.lndo.site');
+}
 
 // Include required files
 require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian.php';
@@ -61,7 +66,6 @@ function wp_image_guardian_activate() {
     // Set default options
     add_option('wp_image_guardian_version', WP_IMAGE_GUARDIAN_VERSION);
     add_option('wp_image_guardian_settings', [
-        'api_base_url' => WP_IMAGE_GUARDIAN_API_BASE_URL,
         'oauth_client_id' => '',
         'oauth_client_secret' => '',
         'tinyeye_api_key' => '',

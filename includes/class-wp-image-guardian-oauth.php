@@ -11,7 +11,7 @@ class WP_Image_Guardian_OAuth {
     
     public function __construct() {
         $this->settings = get_option('wp_image_guardian_settings', []);
-        $this->api_base_url = $this->settings['api_base_url'] ?? WP_IMAGE_GUARDIAN_API_BASE_URL;
+        $this->api_base_url = WP_IMAGE_GUARDIAN_API_BASE_URL;
     }
     
     public function init() {
@@ -38,11 +38,29 @@ class WP_Image_Guardian_OAuth {
     }
     
     public function handle_oauth_redirect() {
-        if (isset($_GET['page']) && $_GET['page'] === 'wp-image-guardian' && isset($_GET['action']) && $_GET['action'] === 'oauth') {
-            $auth_url = $this->get_authorization_url();
-            wp_redirect($auth_url);
-            exit;
+        // Validate GET parameters
+        if (!isset($_GET['page']) || $_GET['page'] !== 'wp-image-guardian') {
+            return;
         }
+        
+        if (!isset($_GET['action']) || $_GET['action'] !== 'oauth') {
+            return;
+        }
+        
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions', 'wp-image-guardian'), __('Error', 'wp-image-guardian'), ['response' => 403]);
+        }
+        
+        $auth_url = $this->get_authorization_url();
+        
+        // Validate URL before redirecting
+        if (!filter_var($auth_url, FILTER_VALIDATE_URL)) {
+            wp_die(__('Invalid authorization URL', 'wp-image-guardian'), __('Error', 'wp-image-guardian'), ['response' => 500]);
+        }
+        
+        wp_safe_redirect($auth_url);
+        exit;
     }
     
     public function handle_callback($code, $state) {
@@ -63,7 +81,7 @@ class WP_Image_Guardian_OAuth {
             update_option('wp_image_guardian_oauth_tokens', $token_data['data']);
             
             // Get user info
-            $user_info = $this->get_user_info($token_data['data']['access_token']);
+            $user_info = $this->fetch_user_info($token_data['data']['access_token']);
             
             if ($user_info['success']) {
                 update_option('wp_image_guardian_user_info', $user_info['data']);
@@ -123,7 +141,7 @@ class WP_Image_Guardian_OAuth {
         ];
     }
     
-    private function get_user_info($access_token) {
+    private function fetch_user_info($access_token) {
         $response = wp_remote_get($this->api_base_url . '/account', [
             'headers' => [
                 'Authorization' => 'Bearer ' . $access_token,

@@ -77,6 +77,9 @@ jobs:
       - name: Create zip file (minimal)
         run: |
           cd build
+          # Remove build artifacts before zipping
+          rm -f wp-image-guardian/BUILD.txt wp-image-guardian/BUILD.md wp-image-guardian/INSTALLATION.md 2>/dev/null || true
+          # Create zip with proper exclusions
           zip -r wp-image-guardian-${{ steps.get_version.outputs.version }}.zip wp-image-guardian/ \
             -x "*.git*" \
             -x "*.DS_Store" \
@@ -89,12 +92,16 @@ jobs:
       - name: Create zip file (full)
         run: |
           cd build
+          # Remove build artifacts before zipping (full version keeps README.md)
+          rm -f wp-image-guardian/BUILD.txt wp-image-guardian/BUILD.md 2>/dev/null || true
+          # Create zip with proper exclusions
           zip -r wp-image-guardian-${{ steps.get_version.outputs.version }}-full.zip wp-image-guardian/ \
             -x "*.git*" \
             -x "*.DS_Store" \
             -x "*node_modules/*" \
             -x "*.log" \
-            -x "BUILD.txt"
+            -x "BUILD.txt" \
+            -x "BUILD.md"
       
       - name: Generate checksums
         run: |

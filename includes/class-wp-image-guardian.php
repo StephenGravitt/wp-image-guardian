@@ -85,7 +85,7 @@ class WP_Image_Guardian {
             wp_localize_script('wp-image-guardian-admin', 'wpImageGuardian', [
                 'ajaxUrl' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('wp_image_guardian_nonce'),
-                'apiBaseUrl' => get_option('wp_image_guardian_settings')['api_base_url'] ?? WP_IMAGE_GUARDIAN_API_BASE_URL,
+                'apiBaseUrl' => WP_IMAGE_GUARDIAN_API_BASE_URL,
                 'isPremium' => $this->premium->is_premium_user(),
                 'strings' => [
                     'checking' => __('Checking image...', 'wp-image-guardian'),
@@ -103,17 +103,40 @@ class WP_Image_Guardian {
     }
     
     public function ajax_check_image() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('upload_files')) {
-            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
         }
         
-        $attachment_id = intval($_POST['attachment_id']);
-        $image_url = wp_get_attachment_url($attachment_id);
+        // Check capabilities
+        if (!current_user_can('upload_files')) {
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
+        }
         
+        // Validate and sanitize attachment ID
+        if (!isset($_POST['attachment_id'])) {
+            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        $attachment_id = absint($_POST['attachment_id']);
+        if ($attachment_id <= 0) {
+            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Verify attachment exists and is an image
+        if (!wp_attachment_is_image($attachment_id)) {
+            wp_send_json_error(__('Invalid image attachment', 'wp-image-guardian'));
+            return;
+        }
+        
+        $image_url = wp_get_attachment_url($attachment_id);
         if (!$image_url) {
-            wp_send_json_error(__('Invalid image', 'wp-image-guardian'));
+            wp_send_json_error(__('Invalid image URL', 'wp-image-guardian'));
+            return;
         }
         
         $result = $this->api->check_image($image_url);
@@ -132,26 +155,72 @@ class WP_Image_Guardian {
     }
     
     public function ajax_get_results() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('upload_files')) {
-            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
         }
         
-        $attachment_id = intval($_POST['attachment_id']);
+        // Check capabilities
+        if (!current_user_can('upload_files')) {
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Validate and sanitize attachment ID
+        if (!isset($_POST['attachment_id'])) {
+            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        $attachment_id = absint($_POST['attachment_id']);
+        if ($attachment_id <= 0) {
+            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Verify attachment exists
+        if (!get_post($attachment_id)) {
+            wp_send_json_error(__('Attachment not found', 'wp-image-guardian'));
+            return;
+        }
+        
         $results = $this->database->get_image_results($attachment_id);
         
         wp_send_json_success($results);
     }
     
     public function ajax_mark_safe() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('upload_files')) {
-            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
         }
         
-        $attachment_id = intval($_POST['attachment_id']);
+        // Check capabilities
+        if (!current_user_can('upload_files')) {
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Validate and sanitize attachment ID
+        if (!isset($_POST['attachment_id'])) {
+            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        $attachment_id = absint($_POST['attachment_id']);
+        if ($attachment_id <= 0) {
+            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Verify attachment exists
+        if (!get_post($attachment_id)) {
+            wp_send_json_error(__('Attachment not found', 'wp-image-guardian'));
+            return;
+        }
+        
         $this->database->mark_image_safe($attachment_id);
         
         // Fire action hook
@@ -161,13 +230,36 @@ class WP_Image_Guardian {
     }
     
     public function ajax_mark_unsafe() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('upload_files')) {
-            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
         }
         
-        $attachment_id = intval($_POST['attachment_id']);
+        // Check capabilities
+        if (!current_user_can('upload_files')) {
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Validate and sanitize attachment ID
+        if (!isset($_POST['attachment_id'])) {
+            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        $attachment_id = absint($_POST['attachment_id']);
+        if ($attachment_id <= 0) {
+            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Verify attachment exists
+        if (!get_post($attachment_id)) {
+            wp_send_json_error(__('Attachment not found', 'wp-image-guardian'));
+            return;
+        }
+        
         $this->database->mark_image_unsafe($attachment_id);
         
         // Fire action hook
@@ -177,24 +269,43 @@ class WP_Image_Guardian {
     }
     
     public function ajax_oauth_callback() {
-        $code = sanitize_text_field($_GET['code']);
-        $state = sanitize_text_field($_GET['state']);
+        // Validate and sanitize OAuth callback parameters
+        if (!isset($_GET['code']) || !isset($_GET['state'])) {
+            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&tab=settings&oauth=error&message=' . urlencode(__('Missing OAuth parameters', 'wp-image-guardian'))));
+            exit;
+        }
+        
+        $code = sanitize_text_field(wp_unslash($_GET['code']));
+        $state = sanitize_text_field(wp_unslash($_GET['state']));
+        
+        // Validate code and state format (alphanumeric and common OAuth characters)
+        if (!preg_match('/^[a-zA-Z0-9\-_\.]+$/', $code) || !preg_match('/^[a-zA-Z0-9\-_\.]+$/', $state)) {
+            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&tab=settings&oauth=error&message=' . urlencode(__('Invalid OAuth parameters', 'wp-image-guardian'))));
+            exit;
+        }
         
         $result = $this->oauth->handle_callback($code, $state);
         
         if ($result['success']) {
-            wp_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=success'));
+            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&tab=dashboard&oauth=success'));
         } else {
-            wp_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=error&message=' . urlencode($result['message'])));
+            $error_message = isset($result['message']) ? sanitize_text_field($result['message']) : __('OAuth authentication failed', 'wp-image-guardian');
+            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&tab=settings&oauth=error&message=' . urlencode($error_message)));
         }
         exit;
     }
     
     public function ajax_disconnect() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
+        }
         
+        // Check capabilities
         if (!current_user_can('manage_options')) {
-            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
         }
         
         $this->oauth->disconnect();
@@ -203,10 +314,16 @@ class WP_Image_Guardian {
     }
     
     public function ajax_get_usage_stats() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
+        }
         
+        // Check capabilities
         if (!current_user_can('upload_files')) {
-            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
         }
         
         $usage_stats = $this->api->get_usage_stats();
@@ -214,21 +331,59 @@ class WP_Image_Guardian {
         if ($usage_stats['success']) {
             wp_send_json_success($usage_stats['data']);
         } else {
-            wp_send_json_error($usage_stats['message']);
+            $error_message = isset($usage_stats['message']) ? sanitize_text_field($usage_stats['message']) : __('Failed to get usage stats', 'wp-image-guardian');
+            wp_send_json_error($error_message);
         }
     }
     
     public function ajax_bulk_check() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('upload_files') || !$this->premium->is_premium_user()) {
-            wp_die(__('Premium feature - upgrade required', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
         }
         
-        $attachment_ids = array_map('intval', $_POST['attachment_ids']);
+        // Check capabilities
+        if (!current_user_can('upload_files')) {
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Check premium status
+        if (!$this->premium->is_premium_user()) {
+            wp_send_json_error(__('Premium feature - upgrade required', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Validate and sanitize attachment IDs
+        if (!isset($_POST['attachment_ids']) || !is_array($_POST['attachment_ids'])) {
+            wp_send_json_error(__('Invalid attachment IDs', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Sanitize and limit attachment IDs (prevent DoS)
+        $attachment_ids = array_map('absint', $_POST['attachment_ids']);
+        $attachment_ids = array_filter($attachment_ids, function($id) {
+            return $id > 0 && get_post($id) !== null;
+        });
+        
+        // Limit to 50 attachments per request to prevent timeout/DoS
+        $attachment_ids = array_slice($attachment_ids, 0, 50);
+        
+        if (empty($attachment_ids)) {
+            wp_send_json_error(__('No valid attachments found', 'wp-image-guardian'));
+            return;
+        }
+        
         $results = [];
         
         foreach ($attachment_ids as $attachment_id) {
+            // Verify it's an image
+            if (!wp_attachment_is_image($attachment_id)) {
+                $results[] = ['id' => $attachment_id, 'status' => 'error', 'message' => __('Not an image', 'wp-image-guardian')];
+                continue;
+            }
+            
             $image_url = wp_get_attachment_url($attachment_id);
             if ($image_url) {
                 $result = $this->api->check_image($image_url);
@@ -238,8 +393,11 @@ class WP_Image_Guardian {
                     do_action('wp_image_guardian_image_checked', $attachment_id, $result['data']);
                     $results[] = ['id' => $attachment_id, 'status' => 'checked'];
                 } else {
-                    $results[] = ['id' => $attachment_id, 'status' => 'error', 'message' => $result['message']];
+                    $error_message = isset($result['message']) ? sanitize_text_field($result['message']) : __('Check failed', 'wp-image-guardian');
+                    $results[] = ['id' => $attachment_id, 'status' => 'error', 'message' => $error_message];
                 }
+            } else {
+                $results[] = ['id' => $attachment_id, 'status' => 'error', 'message' => __('Invalid image URL', 'wp-image-guardian')];
             }
         }
         
@@ -247,14 +405,34 @@ class WP_Image_Guardian {
     }
     
     public function ajax_auto_check() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('manage_options') || !$this->premium->is_premium_user()) {
-            wp_die(__('Premium feature - upgrade required', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
         }
         
-        $enabled = $_POST['enabled'] === 'true';
-        update_option('wp_image_guardian_auto_check', $enabled);
+        // Check capabilities
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Check premium status
+        if (!$this->premium->is_premium_user()) {
+            wp_send_json_error(__('Premium feature - upgrade required', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Validate and sanitize enabled parameter
+        if (!isset($_POST['enabled'])) {
+            wp_send_json_error(__('Missing enabled parameter', 'wp-image-guardian'));
+            return;
+        }
+        
+        $enabled = sanitize_text_field($_POST['enabled']);
+        $enabled = ($enabled === 'true' || $enabled === '1' || $enabled === true);
+        
+        update_option('wp_image_guardian_auto_check', (bool) $enabled);
         
         if ($enabled) {
             wp_schedule_event(time(), 'hourly', 'wp_image_guardian_check_new_uploads');

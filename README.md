@@ -29,11 +29,31 @@ A WordPress plugin that integrates with the Image Guardian API service to automa
 
 ## Configuration
 
+### API Base URL
+
+The plugin uses the `WP_IMAGE_GUARDIAN_API_BASE_URL` constant to connect to your Laravel API service. 
+
+**Default (Local Development)**: `http://image-guardian.lndo.site`
+
+To override, add this to your `wp-config.php` before the plugin loads:
+```php
+define('WP_IMAGE_GUARDIAN_API_BASE_URL', 'http://your-api-url.com');
+```
+
+**Important**: The plugin expects endpoints at the root level:
+- OAuth: `/oauth/authorize`, `/oauth/token`
+- API: `/plugin/search`, `/plugin/status`, `/search/usage/stats`, etc.
+
+If your Laravel API routes are under the `/api` prefix, you have two options:
+1. Set the base URL to include `/api`: `http://image-guardian.lndo.site/api` (if ALL routes including OAuth are under `/api`)
+2. Or modify the endpoint paths in the API class to include `/api` prefix
+
+**Note**: OAuth routes in Laravel Passport are typically at root level, while API routes may be under `/api`. Verify your Laravel route structure once the service is running.
+
 ### Required Settings
 
-1. **Image Guardian API Base URL**: Your Image Guardian service endpoint
-2. **OAuth Credentials**: Client ID and Secret from Image Guardian
-3. **TinyEye API Key**: Your personal TinyEye API key
+1. **OAuth Credentials**: Client ID and Secret from Image Guardian
+2. **TinyEye API Key**: Your personal TinyEye API key
 
 ### OAuth Setup
 
@@ -75,12 +95,22 @@ A WordPress plugin that integrates with the Image Guardian API service to automa
 
 ## API Integration
 
-The plugin integrates with the Image Guardian API service:
+The plugin integrates with the Image Guardian Laravel API service:
 
 - **Authentication**: OAuth2 with Bearer tokens
-- **Image Checking**: POST to `/api/v1/plugin/search`
-- **Account Status**: GET from `/api/v1/plugin/status`
-- **Usage Stats**: GET from `/api/v1/search/usage/stats`
+- **Base URL**: Configured via `WP_IMAGE_GUARDIAN_API_BASE_URL` constant (default: `http://image-guardian.lndo.site`)
+- **Endpoints**:
+  - OAuth: `/oauth/authorize`, `/oauth/token`
+  - Account: `/account`
+  - Image Checking: POST to `/plugin/search`
+  - Account Status: GET from `/plugin/status`
+  - Usage Stats: GET from `/search/usage/stats`
+  - Search History: GET from `/search/history`
+  - Domain Registration: POST to `/domains`
+
+**Route Structure Note**: The plugin assumes endpoints are at the root level of your Laravel application. If your Laravel API routes are under the `/api` prefix, you'll need to either:
+- Set the base URL to include `/api` (if all routes including OAuth are there), OR
+- Modify the endpoint paths in `includes/class-wp-image-guardian-api.php` and `includes/class-wp-image-guardian-oauth.php`
 
 ## Database Schema
 

@@ -112,14 +112,34 @@ class WP_Image_Guardian_Premium {
     
     
     public function handle_auto_check_toggle() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('manage_options') || !$this->is_premium_user()) {
-            wp_die(__('Premium feature - upgrade required', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
         }
         
-        $enabled = $_POST['enabled'] === 'true';
-        update_option('wp_image_guardian_auto_check', $enabled);
+        // Check capabilities
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Check premium status
+        if (!$this->is_premium_user()) {
+            wp_send_json_error(__('Premium feature - upgrade required', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Validate and sanitize enabled parameter
+        if (!isset($_POST['enabled'])) {
+            wp_send_json_error(__('Missing enabled parameter', 'wp-image-guardian'));
+            return;
+        }
+        
+        $enabled = sanitize_text_field($_POST['enabled']);
+        $enabled = ($enabled === 'true' || $enabled === '1' || $enabled === true);
+        
+        update_option('wp_image_guardian_auto_check', (bool) $enabled);
         
         if ($enabled) {
             wp_schedule_event(time(), 'hourly', 'wp_image_guardian_check_new_uploads');
@@ -131,16 +151,19 @@ class WP_Image_Guardian_Premium {
     }
     
     private function handle_auto_check_settings() {
-        if (!wp_verify_nonce($_POST['wp_image_guardian_nonce'], 'wp_image_guardian_auto_check')) {
-            wp_die(__('Security check failed', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['wp_image_guardian_nonce']) || !wp_verify_nonce($_POST['wp_image_guardian_nonce'], 'wp_image_guardian_auto_check')) {
+            wp_die(__('Security check failed', 'wp-image-guardian'), __('Error', 'wp-image-guardian'), ['response' => 403]);
         }
         
+        // Check capabilities
         if (!current_user_can('manage_options')) {
-            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+            wp_die(__('Insufficient permissions', 'wp-image-guardian'), __('Error', 'wp-image-guardian'), ['response' => 403]);
         }
         
-        $auto_check = isset($_POST['auto_check']) ? true : false;
-        update_option('wp_image_guardian_auto_check', $auto_check);
+        // Validate and sanitize auto_check parameter
+        $auto_check = isset($_POST['auto_check']) && ($_POST['auto_check'] === '1' || $_POST['auto_check'] === 'on' || $_POST['auto_check'] === true);
+        update_option('wp_image_guardian_auto_check', (bool) $auto_check);
         
         if ($auto_check) {
             wp_schedule_event(time(), 'hourly', 'wp_image_guardian_check_new_uploads');
@@ -148,11 +171,9 @@ class WP_Image_Guardian_Premium {
             wp_clear_scheduled_hook('wp_image_guardian_check_new_uploads');
         }
         
-        add_action('admin_notices', function() {
-            echo '<div class="notice notice-success"><p>' . 
-                 __('Auto-check settings saved!', 'wp-image-guardian') . 
-                 '</p></div>';
-        });
+        // Redirect to prevent resubmission
+        wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian-auto&settings-updated=true'));
+        exit;
     }
     
     private function calculate_risk_level($results) {
@@ -173,7 +194,7 @@ class WP_Image_Guardian_Premium {
         echo '<div class="notice notice-warning">';
         echo '<p><strong>' . __('Premium Feature', 'wp-image-guardian') . '</strong></p>';
         echo '<p>' . __('This feature requires a premium subscription. Please upgrade your account to access bulk checking and auto-monitoring features.', 'wp-image-guardian') . '</p>';
-        echo '<p><a href="' . admin_url('upload.php?page=wp-image-guardian') . '" class="button button-primary">' . __('Upgrade Now', 'wp-image-guardian') . '</a></p>';
+        echo '<p><a href="' . admin_url('upload.php?page=wp-image-guardian&tab=dashboard') . '" class="button button-primary">' . __('Upgrade Now', 'wp-image-guardian') . '</a></p>';
         echo '</div>';
         echo '</div>';
     }

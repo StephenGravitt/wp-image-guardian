@@ -185,13 +185,36 @@ class WP_Image_Guardian_Media {
     }
     
     public function get_modal_content() {
-        check_ajax_referer('wp_image_guardian_nonce', 'nonce');
-        
-        if (!current_user_can('upload_files')) {
-            wp_die(__('Insufficient permissions', 'wp-image-guardian'));
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
+            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+            return;
         }
         
-        $attachment_id = intval($_POST['attachment_id']);
+        // Check capabilities
+        if (!current_user_can('upload_files')) {
+            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Validate and sanitize attachment ID
+        if (!isset($_POST['attachment_id'])) {
+            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        $attachment_id = absint($_POST['attachment_id']);
+        if ($attachment_id <= 0) {
+            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
+            return;
+        }
+        
+        // Verify attachment exists
+        if (!get_post($attachment_id)) {
+            wp_send_json_error(__('Attachment not found', 'wp-image-guardian'));
+            return;
+        }
+        
         $results = $this->database->get_image_results($attachment_id);
         
         if (!$results) {
