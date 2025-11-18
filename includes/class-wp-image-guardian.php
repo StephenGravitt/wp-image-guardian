@@ -271,7 +271,7 @@ class WP_Image_Guardian {
     public function ajax_oauth_callback() {
         // Validate and sanitize OAuth callback parameters
         if (!isset($_GET['code']) || !isset($_GET['state'])) {
-            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&tab=settings&oauth=error&message=' . urlencode(__('Missing OAuth parameters', 'wp-image-guardian'))));
+            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=error&message=' . urlencode(__('Missing OAuth parameters', 'wp-image-guardian'))));
             exit;
         }
         
@@ -280,17 +280,17 @@ class WP_Image_Guardian {
         
         // Validate code and state format (alphanumeric and common OAuth characters)
         if (!preg_match('/^[a-zA-Z0-9\-_\.]+$/', $code) || !preg_match('/^[a-zA-Z0-9\-_\.]+$/', $state)) {
-            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&tab=settings&oauth=error&message=' . urlencode(__('Invalid OAuth parameters', 'wp-image-guardian'))));
+            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=error&message=' . urlencode(__('Invalid OAuth parameters', 'wp-image-guardian'))));
             exit;
         }
         
         $result = $this->oauth->handle_callback($code, $state);
         
         if ($result['success']) {
-            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&tab=dashboard&oauth=success'));
+            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=success'));
         } else {
             $error_message = isset($result['message']) ? sanitize_text_field($result['message']) : __('OAuth authentication failed', 'wp-image-guardian');
-            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&tab=settings&oauth=error&message=' . urlencode($error_message)));
+            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=error&message=' . urlencode($error_message)));
         }
         exit;
     }

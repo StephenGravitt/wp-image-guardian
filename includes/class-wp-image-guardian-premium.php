@@ -45,6 +45,16 @@ class WP_Image_Guardian_Premium {
     }
     
     public function is_premium_user() {
+        // Check settings first (set from API during OAuth) to avoid unnecessary API calls
+        $settings = get_option('wp_image_guardian_settings', []);
+        $subscription_plan = $settings['subscription_plan'] ?? 'free';
+        
+        // If already premium in settings, return true
+        if (in_array($subscription_plan, ['premium_monthly', 'premium_yearly', 'active'])) {
+            return true;
+        }
+        
+        // Otherwise check API for actual subscription status (may have changed)
         $account_status = $this->api->get_account_status();
         
         if (!$account_status['success']) {
@@ -52,9 +62,17 @@ class WP_Image_Guardian_Premium {
         }
         
         $data = $account_status['data'];
-        $subscription_status = $data['account']['subscription_status'] ?? 'inactive';
+        // Check both possible locations for subscription status
+        $subscription_status = $data['subscription_plan'] ?? $data['subscription_status'] ?? $data['account']['subscription_status'] ?? 'free';
         
-        return in_array($subscription_status, ['active', 'premium_monthly', 'premium_yearly']);
+        // Update settings if subscription changed
+        if (in_array($subscription_status, ['premium_monthly', 'premium_yearly', 'active'])) {
+            $settings['subscription_plan'] = $subscription_status;
+            update_option('wp_image_guardian_settings', $settings);
+            return true;
+        }
+        
+        return false;
     }
     
     public function get_premium_features() {
@@ -194,7 +212,7 @@ class WP_Image_Guardian_Premium {
         echo '<div class="notice notice-warning">';
         echo '<p><strong>' . __('Premium Feature', 'wp-image-guardian') . '</strong></p>';
         echo '<p>' . __('This feature requires a premium subscription. Please upgrade your account to access bulk checking and auto-monitoring features.', 'wp-image-guardian') . '</p>';
-        echo '<p><a href="' . admin_url('upload.php?page=wp-image-guardian&tab=dashboard') . '" class="button button-primary">' . __('Upgrade Now', 'wp-image-guardian') . '</a></p>';
+        echo '<p><a href="' . admin_url('upload.php?page=wp-image-guardian') . '" class="button button-primary">' . __('Upgrade Now', 'wp-image-guardian') . '</a></p>';
         echo '</div>';
         echo '</div>';
     }

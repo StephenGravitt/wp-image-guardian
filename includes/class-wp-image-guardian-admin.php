@@ -64,14 +64,27 @@ class WP_Image_Guardian_Admin {
     }
     
     public function admin_notices() {
-        // Only show notices on our admin page
+        $oauth_connected = $this->oauth->is_connected();
+        
+        // Show notice on all admin pages if not connected (except on Image Guardian page itself)
+        if (!$oauth_connected && (!isset($_GET['page']) || $_GET['page'] !== 'wp-image-guardian')) {
+            $image_guardian_url = admin_url('upload.php?page=wp-image-guardian');
+            echo '<div class="notice notice-warning is-dismissible"><p>' . 
+                 sprintf(
+                     esc_html__('Image Guardian is not connected. %s to connect your account.', 'wp-image-guardian'),
+                     '<a href="' . esc_url($image_guardian_url) . '">' . esc_html__('Click here', 'wp-image-guardian') . '</a>'
+                 ) . 
+                 '</p></div>';
+            return;
+        }
+        
+        // Show notices only on our admin page
         if (!isset($_GET['page']) || $_GET['page'] !== 'wp-image-guardian') {
             return;
         }
         
         // Validate and sanitize GET parameters
         $oauth_status = isset($_GET['oauth']) ? sanitize_text_field($_GET['oauth']) : '';
-        $settings_updated = isset($_GET['settings-updated']) ? sanitize_text_field($_GET['settings-updated']) : '';
         
         // OAuth success/error messages
         if ($oauth_status === 'success') {
@@ -84,13 +97,6 @@ class WP_Image_Guardian_Admin {
                  esc_html(sprintf(__('OAuth Error: %s', 'wp-image-guardian'), $message)) . 
                  '</p></div>';
         }
-        
-        // Settings saved message
-        if ($settings_updated === 'true') {
-            echo '<div class="notice notice-success is-dismissible"><p>' . 
-                 esc_html__('Settings saved successfully!', 'wp-image-guardian') . 
-                 '</p></div>';
-        }
     }
     
     public function admin_page() {
@@ -101,26 +107,19 @@ class WP_Image_Guardian_Admin {
         
         $settings = get_option('wp_image_guardian_settings', []);
         $oauth_connected = $this->oauth->is_connected();
+        
+        // If not connected, only show connect button
+        if (!$oauth_connected) {
+            include WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'templates/admin-page.php';
+            return;
+        }
+        
+        // If connected, load full data for dashboard
         $user_info = $this->oauth->get_user_info();
         $account_status = $this->api->get_account_status();
         $usage_stats = $this->api->get_usage_stats();
         $risk_stats = $this->database->get_risk_stats();
         $recent_checks = $this->database->get_recent_checks(10);
-        
-        // Handle settings save (only for users with manage_options capability)
-        if (isset($_POST['submit']) && isset($_POST['wp_image_guardian_nonce'])) {
-            $tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : '';
-            if ($tab === 'settings' && current_user_can('manage_options')) {
-                $this->handle_settings_save();
-            }
-        }
-        
-        // Get and validate current tab
-        $allowed_tabs = ['dashboard', 'settings'];
-        $current_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'dashboard';
-        if (!in_array($current_tab, $allowed_tabs, true)) {
-            $current_tab = 'dashboard';
-        }
         
         include WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'templates/admin-page.php';
     }
@@ -149,11 +148,18 @@ class WP_Image_Guardian_Admin {
             $settings['oauth_client_id'] = substr($oauth_client_id, 0, 255);
         }
         
-        // OAuth Client Secret
-        if (isset($_POST['oauth_client_secret'])) {
+        // OAuth Client Secret - encrypt before storing (per integration guide security best practices)
+        if (isset($_POST['oauth_client_secret']) && !empty($_POST['oauth_client_secret'])) {
             $oauth_client_secret = sanitize_text_field(wp_unslash($_POST['oauth_client_secret']));
-            $settings['oauth_client_secret'] = substr($oauth_client_secret, 0, 255);
+            // Encrypt the secret before storing
+            if (function_exists('wp_encrypt')) {
+                $settings['oauth_client_secret'] = wp_encrypt($oauth_client_secret);
+            } else {
+                // Fallback if wp_encrypt not available (shouldn't happen in WP 6.0+)
+                $settings['oauth_client_secret'] = substr($oauth_client_secret, 0, 255);
+            }
         }
+        // If empty, keep existing value (user didn't change it)
         
         // TinyEye API Key
         if (isset($_POST['tinyeye_api_key'])) {
@@ -173,7 +179,7 @@ class WP_Image_Guardian_Admin {
         $updated = update_option('wp_image_guardian_settings', $settings);
         
         // Redirect to prevent resubmission and show success message
-        $redirect_url = admin_url('upload.php?page=wp-image-guardian&tab=settings&settings-updated=true');
+        $redirect_url = admin_url('upload.php?page=wp-image-guardian&settings-updated=true');
         wp_safe_redirect($redirect_url);
         exit;
     }

@@ -37,10 +37,12 @@ class WP_Image_Guardian_API {
         $settings = get_option('wp_image_guardian_settings', []);
         $tinyeye_api_key = $settings['tinyeye_api_key'] ?? '';
         
+        // TinyEye API key should be set automatically from API during OAuth
+        // If not set, the API service should handle it or return an error
         if (empty($tinyeye_api_key)) {
             return [
                 'success' => false,
-                'message' => __('TinyEye API key not configured. Please add your TinyEye API key in settings.', 'wp-image-guardian')
+                'message' => __('TinyEye API key not configured. Please ensure your Image Guardian account has a TinyEye API key configured.', 'wp-image-guardian')
             ];
         }
         
@@ -50,14 +52,35 @@ class WP_Image_Guardian_API {
             'tinyeye_api_key' => $tinyeye_api_key,
         ], $image_url);
         
-        $response = wp_remote_post($this->api_base_url . '/plugin/search', [
+        $response = wp_remote_post($this->api_base_url . '/api/v1/plugin/search', [
             'headers' => [
                 'Authorization' => 'Bearer ' . $access_token,
                 'Content-Type' => 'application/json',
+                'Origin' => home_url(), // Required for domain validation (per integration guide)
             ],
             'body' => json_encode($check_params),
             'timeout' => 60, // Longer timeout for image search
         ]);
+        
+        // Handle 401 Unauthorized - try refreshing token once
+        $status_code = wp_remote_retrieve_response_code($response);
+        if ($status_code === 401) {
+            $refreshed = $this->oauth->refresh_token();
+            if ($refreshed['success']) {
+                $access_token = $this->oauth->get_access_token();
+                // Retry request with new token
+                $response = wp_remote_post($this->api_base_url . '/api/v1/plugin/search', [
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . $access_token,
+                        'Content-Type' => 'application/json',
+                        'Origin' => home_url(),
+                    ],
+                    'body' => json_encode($check_params),
+                    'timeout' => 60,
+                ]);
+                $status_code = wp_remote_retrieve_response_code($response);
+            }
+        }
         
         if (is_wp_error($response)) {
             return [
@@ -98,13 +121,33 @@ class WP_Image_Guardian_API {
             ];
         }
         
-        $response = wp_remote_get($this->api_base_url . '/plugin/status', [
+        $response = wp_remote_get($this->api_base_url . '/api/v1/plugin/status', [
             'headers' => [
                 'Authorization' => 'Bearer ' . $access_token,
                 'Content-Type' => 'application/json',
+                'Origin' => home_url(), // Required for domain validation (per integration guide)
             ],
             'timeout' => 30,
         ]);
+        
+        // Handle 401 Unauthorized - try refreshing token once
+        $status_code = wp_remote_retrieve_response_code($response);
+        if ($status_code === 401) {
+            $refreshed = $this->oauth->refresh_token();
+            if ($refreshed['success']) {
+                $access_token = $this->oauth->get_access_token();
+                // Retry request with new token
+                $response = wp_remote_get($this->api_base_url . '/api/v1/plugin/status', [
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . $access_token,
+                        'Content-Type' => 'application/json',
+                        'Origin' => home_url(),
+                    ],
+                    'timeout' => 30,
+                ]);
+                $status_code = wp_remote_retrieve_response_code($response);
+            }
+        }
         
         if (is_wp_error($response)) {
             return [
@@ -145,10 +188,11 @@ class WP_Image_Guardian_API {
             ];
         }
         
-        $response = wp_remote_get($this->api_base_url . '/search/usage/stats', [
+        $response = wp_remote_get($this->api_base_url . '/api/v1/search/usage/stats', [
             'headers' => [
                 'Authorization' => 'Bearer ' . $access_token,
                 'Content-Type' => 'application/json',
+                'Origin' => home_url(), // Required for domain validation (per integration guide)
             ],
             'timeout' => 30,
         ]);
@@ -192,10 +236,11 @@ class WP_Image_Guardian_API {
             ];
         }
         
-        $response = wp_remote_get($this->api_base_url . '/search/history?limit=' . $limit, [
+        $response = wp_remote_get($this->api_base_url . '/api/v1/search/history?limit=' . $limit, [
             'headers' => [
                 'Authorization' => 'Bearer ' . $access_token,
                 'Content-Type' => 'application/json',
+                'Origin' => home_url(), // Required for domain validation (per integration guide)
             ],
             'timeout' => 30,
         ]);
@@ -240,19 +285,46 @@ class WP_Image_Guardian_API {
             ];
         }
         
-        $domain = get_site_url();
+        // Extract domain only (no protocol, no www) as per integration guide
+        $site_url = get_site_url();
+        $parsed = parse_url($site_url);
+        $domain = $parsed['host'] ?? '';
+        // Remove www. prefix if present
+        $domain = preg_replace('/^www\./', '', $domain);
         
-        $response = wp_remote_post($this->api_base_url . '/domains', [
+        $response = wp_remote_post($this->api_base_url . '/api/v1/domains', [
             'headers' => [
                 'Authorization' => 'Bearer ' . $access_token,
                 'Content-Type' => 'application/json',
+                'Origin' => home_url(), // Required for domain validation (per integration guide)
             ],
             'body' => json_encode([
                 'domain' => $domain,
-                'site_name' => get_bloginfo('name'),
             ]),
             'timeout' => 30,
         ]);
+        
+        // Handle 401 Unauthorized - try refreshing token once
+        $status_code = wp_remote_retrieve_response_code($response);
+        if ($status_code === 401) {
+            $refreshed = $this->oauth->refresh_token();
+            if ($refreshed['success']) {
+                $access_token = $this->oauth->get_access_token();
+                // Retry request with new token
+                $response = wp_remote_post($this->api_base_url . '/api/v1/domains', [
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . $access_token,
+                        'Content-Type' => 'application/json',
+                        'Origin' => home_url(),
+                    ],
+                    'body' => json_encode([
+                        'domain' => $domain,
+                    ]),
+                    'timeout' => 30,
+                ]);
+                $status_code = wp_remote_retrieve_response_code($response);
+            }
+        }
         
         if (is_wp_error($response)) {
             return [
@@ -265,7 +337,42 @@ class WP_Image_Guardian_API {
         $data = json_decode($body, true);
         
         if (isset($data['success']) && $data['success']) {
-            update_option('wp_image_guardian_domain_approved', true);
+            // Create verification file as per integration guide
+            $verification_token = $data['data']['verification_token'] ?? '';
+            $verification_file = $data['data']['verification_file'] ?? '';
+            
+            if ($verification_token && $verification_file) {
+                $file_path = ABSPATH . $verification_file;
+                $file_created = file_put_contents($file_path, $verification_token);
+                
+                if ($file_created !== false) {
+                    // Set file permissions (read-only as per guide)
+                    chmod($file_path, 0644);
+                    
+                    // Automatically verify domain (per integration guide example)
+                    $domain_id = $data['data']['id'] ?? null;
+                    if ($domain_id) {
+                        $verify_response = wp_remote_post($this->api_base_url . '/api/v1/domains/' . $domain_id . '/verify', [
+                            'headers' => [
+                                'Authorization' => 'Bearer ' . $access_token,
+                                'Content-Type' => 'application/json',
+                                'Origin' => home_url(),
+                            ],
+                            'timeout' => 30,
+                        ]);
+                        
+                        // Check verification result
+                        if (!is_wp_error($verify_response)) {
+                            $verify_body = wp_remote_retrieve_body($verify_response);
+                            $verify_data = json_decode($verify_body, true);
+                            if (isset($verify_data['success']) && $verify_data['success']) {
+                                update_option('wp_image_guardian_domain_approved', true);
+                            }
+                        }
+                    }
+                }
+            }
+            
             return [
                 'success' => true,
                 'data' => $data['data']
