@@ -19,69 +19,74 @@ jQuery(document).ready(function($) {
             return;
         }
         
-        button.addClass('checking').text(wpImageGuardian.strings.checking);
+        var originalText = button.text();
+        button.addClass('checking').prop('disabled', true).text(wpImageGuardian.strings.checking);
         
         $.post(ajaxurl, {
             action: 'wp_image_guardian_check_image',
             attachment_id: attachmentId,
             nonce: wpImageGuardian.nonce
         }, function(response) {
-            button.removeClass('checking');
+            button.removeClass('checking').prop('disabled', false);
             
             if (response.success) {
-                button.text(wpImageGuardian.strings.safe);
+                // Show success message briefly, then reload
+                button.text('✓ ' + wpImageGuardian.strings.checked || 'Checked');
                 button.addClass('checked');
-                
-                // Update status display
-                updateImageStatus(attachmentId, response.data);
                 
                 // Reload page to show updated status
                 setTimeout(function() {
                     location.reload();
-                }, 1000);
+                }, 500);
             } else {
-                button.text(wpImageGuardian.strings.error);
-                alert('Error: ' + response.data);
+                button.text(originalText);
+                alert('Error: ' + (response.data || 'Unknown error'));
             }
+        }).fail(function() {
+            button.removeClass('checking').prop('disabled', false).text(originalText);
+            alert('Network error. Please try again.');
         });
     });
     
-    // Handle mark safe/unsafe buttons
-    $(document).on('click', '.mark-safe, .mark-unsafe', function(e) {
-        e.preventDefault();
+    // Handle image safe toggle
+    $(document).on('change', '.image-safe-toggle', function(e) {
+        var checkbox = $(this);
+        var attachmentId = checkbox.data('attachment-id');
+        var isSafe = checkbox.is(':checked');
         
-        var button = $(this);
-        var attachmentId = button.data('attachment-id');
-        var action = button.hasClass('mark-safe') ? 'mark_safe' : 'mark_unsafe';
-        
-        if (button.hasClass('processing')) {
-            return;
-        }
-        
-        button.addClass('processing').prop('disabled', true);
+        checkbox.prop('disabled', true);
         
         $.post(ajaxurl, {
-            action: 'wp_image_guardian_' + action,
+            action: 'wp_image_guardian_toggle_image_safe',
             attachment_id: attachmentId,
+            is_safe: isSafe,
             nonce: wpImageGuardian.nonce
         }, function(response) {
-            button.removeClass('processing').prop('disabled', false);
+            checkbox.prop('disabled', false);
             
-            if (response.success) {
-                // Update status display
-                updateImageStatus(attachmentId, { user_decision: action.replace('mark_', '') });
-                button.closest('.status-actions').html('<span class="marked">' + response.data + '</span>');
-            } else {
-                alert('Error: ' + response.data);
+            if (!response.success) {
+                // Revert checkbox on error
+                checkbox.prop('checked', !isSafe);
+                alert('Error: ' + (response.data || 'Failed to update status'));
             }
+        }).fail(function() {
+            checkbox.prop('disabled', false);
+            checkbox.prop('checked', !isSafe);
+            alert('Network error. Please try again.');
         });
     });
     
     // Handle view results button
     $(document).on('click', '.view-results, .view-detailed-results', function(e) {
-        e.preventDefault();
+        if ($(this).is(':disabled') || $(this).hasClass('disabled')) {
+            e.preventDefault();
+            console.log('[WP Image Guardian] View Results button is disabled');
+            return;
+        }
         
+        e.preventDefault();
         var attachmentId = $(this).data('attachment-id');
+        console.log('[WP Image Guardian] View Results clicked for attachment:', attachmentId);
         showResultsModal(attachmentId);
     });
     
@@ -148,60 +153,44 @@ jQuery(document).ready(function($) {
         });
     });
     
-    // Handle disconnect OAuth
-    $(document).on('click', '#disconnect-oauth', function(e) {
-        e.preventDefault();
-        
-        if (confirm('Are you sure you want to disconnect from Image Guardian?')) {
-            $.post(ajaxurl, {
-                action: 'wp_image_guardian_disconnect',
-                nonce: wpImageGuardian.nonce
-            }, function(response) {
-                if (response.success) {
-                    location.reload();
-                } else {
-                    alert('Error disconnecting. Please try again.');
-                }
-            });
-        }
-    });
-    
-    // Utility functions
-    function updateImageStatus(attachmentId, data) {
-        var statusContainer = $('.wp-image-guardian-status[data-attachment-id="' + attachmentId + '"]');
-        if (statusContainer.length) {
-            // Update status display based on data
-            var riskLevel = data.risk_level || 'unknown';
-            var userDecision = data.user_decision;
-            
-            statusContainer.removeClass('status-safe status-warning status-danger status-unknown')
-                          .addClass('status-' + riskLevel);
-            
-            if (userDecision) {
-                statusContainer.addClass('user-marked-' + userDecision);
-            }
-        }
-    }
     
     function showResultsModal(attachmentId) {
+        console.log('[WP Image Guardian] showResultsModal called with attachment ID:', attachmentId);
+        
         $('#wp-image-guardian-modal').show();
         $('.wp-image-guardian-loading').show();
         $('.wp-image-guardian-results').hide();
+        
+        console.log('[WP Image Guardian] Sending AJAX request to get modal content');
         
         $.post(ajaxurl, {
             action: 'wp_image_guardian_get_modal_content',
             attachment_id: attachmentId,
             nonce: wpImageGuardian.nonce
         }, function(response) {
+            console.log('[WP Image Guardian] AJAX response received:', response);
             $('.wp-image-guardian-loading').hide();
             
             if (response.success) {
+                console.log('[WP Image Guardian] Response successful, content length:', response.data.content ? response.data.content.length : 0);
                 $('.wp-image-guardian-results').html(response.data.content).show();
             } else {
+                console.error('[WP Image Guardian] Response error:', response.data);
                 $('.wp-image-guardian-results').html(
                     '<div class="wp-image-guardian-error">' + response.data + '</div>'
                 ).show();
             }
+        }).fail(function(jqXHR, textStatus, errorThrown) {
+            console.error('[WP Image Guardian] AJAX request failed:', {
+                status: jqXHR.status,
+                statusText: textStatus,
+                error: errorThrown,
+                responseText: jqXHR.responseText ? jqXHR.responseText.substring(0, 500) : 'No response'
+            });
+            $('.wp-image-guardian-loading').hide();
+            $('.wp-image-guardian-results').html(
+                '<div class="wp-image-guardian-error">Network error. Please check the console and debug log for details.</div>'
+            ).show();
         });
     }
     
@@ -231,54 +220,18 @@ jQuery(document).ready(function($) {
         }
     });
     
-    // Initialize status indicators
-    $('.wp-image-guardian-status').each(function() {
-        var status = $(this);
-        var attachmentId = status.data('attachment-id');
-        
-        // Add click handlers for status actions
-        status.find('.mark-safe, .mark-unsafe').on('click', function(e) {
-            e.preventDefault();
-            var action = $(this).hasClass('mark-safe') ? 'mark_safe' : 'mark_unsafe';
-            
-            $(this).addClass('processing').prop('disabled', true);
-            
-            $.post(ajaxurl, {
-                action: 'wp_image_guardian_' + action,
-                attachment_id: attachmentId,
-                nonce: wpImageGuardian.nonce
-            }, function(response) {
-                if (response.success) {
-                    status.find('.status-actions').html('<span class="marked">' + response.data + '</span>');
-                } else {
-                    alert('Error: ' + response.data);
-                }
-            });
-        });
-    });
-    
-    // Auto-refresh usage stats
-    if ($('.wp-image-guardian-stats').length) {
+    // Auto-refresh remaining searches
+    if ($('.remaining-searches-count').length) {
         setInterval(function() {
             $.post(ajaxurl, {
-                action: 'wp_image_guardian_get_usage_stats',
+                action: 'wp_image_guardian_get_remaining_searches',
                 nonce: wpImageGuardian.nonce
             }, function(response) {
-                if (response.success) {
-                    updateUsageStats(response.data);
+                if (response.success && response.data.remaining_searches !== undefined) {
+                    $('.remaining-searches-count').text(response.data.remaining_searches);
+                    $('#remaining-searches').text(response.data.remaining_searches);
                 }
             });
         }, 30000); // Refresh every 30 seconds
-    }
-    
-    function updateUsageStats(data) {
-        $('.stat-box').each(function() {
-            var stat = $(this);
-            var type = stat.data('stat-type');
-            
-            if (type && data[type] !== undefined) {
-                stat.find('h3').text(data[type]);
-            }
-        });
     }
 });

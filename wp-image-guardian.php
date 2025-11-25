@@ -25,22 +25,24 @@ define('WP_IMAGE_GUARDIAN_VERSION', '1.0.0');
 define('WP_IMAGE_GUARDIAN_PLUGIN_FILE', __FILE__);
 define('WP_IMAGE_GUARDIAN_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_IMAGE_GUARDIAN_PLUGIN_URL', plugin_dir_url(__FILE__));
-// API base URL - must be set to your Image Guardian API service
-// Default is Lando local development URL (https://image-guardian.lndo.site)
-// To override, define this constant in wp-config.php before the plugin loads
-// Note: All API endpoints are versioned under /api/v1/ prefix
-if (!defined('WP_IMAGE_GUARDIAN_API_BASE_URL')) {
-    define('WP_IMAGE_GUARDIAN_API_BASE_URL', 'https://image-guardian.lndo.site');
-}
+
+// TinyEye API Key can be set via constant in wp-config.php
+// Example: define('WP_IMAGE_GUARDIAN_TINEYE_API_KEY', 'your-api-key-here');
+//
+// Site URL Override can be set via constant in wp-config.php for local development
+// This replaces local URLs with production URLs when sending to TinyEye API
+// Example: define('WP_IMAGE_GUARDIAN_SITE_URL_OVERRIDE', 'https://www.pacificzen.org/');
 
 // Include required files
-require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian.php';
-require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-oauth.php';
+require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-helpers.php';
+require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-tinyeye-api.php';
 require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-api.php';
-require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-admin.php';
-require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-media.php';
 require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-database.php';
+require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-media.php';
+require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-admin.php';
 require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-premium.php';
+require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian-bulk-check.php';
+require_once WP_IMAGE_GUARDIAN_PLUGIN_DIR . 'includes/class-wp-image-guardian.php';
 
 // Initialize the plugin
 function wp_image_guardian_init() {
@@ -65,11 +67,7 @@ function wp_image_guardian_activate() {
     // Set default options
     add_option('wp_image_guardian_version', WP_IMAGE_GUARDIAN_VERSION);
     add_option('wp_image_guardian_settings', [
-        'oauth_client_id' => '',
-        'oauth_client_secret' => '',
         'tinyeye_api_key' => '',
-        'subscription_plan' => 'free',
-        'domain_approved' => false,
     ]);
 }
 
@@ -94,8 +92,7 @@ function wp_image_guardian_uninstall() {
     // Remove options
     delete_option('wp_image_guardian_version');
     delete_option('wp_image_guardian_settings');
-    delete_option('wp_image_guardian_oauth_tokens');
-    delete_option('wp_image_guardian_user_info');
-    delete_option('wp_image_guardian_domain_approved');
     delete_option('wp_image_guardian_auto_check');
+    delete_option('wp_image_guardian_bulk_check_status');
+    delete_option('wp_image_guardian_bulk_check_progress');
 }
