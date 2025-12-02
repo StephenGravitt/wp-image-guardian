@@ -129,7 +129,17 @@ rsync -av --exclude='.git' \
       --exclude='BUILD.md' \
       --exclude='INSTALLATION.md' \
       --exclude='TROUBLESHOOTING.md' \
+      --exclude='CLICKABLE_LINKS_UPDATE.md' \
+      --exclude='FIXES_SUMMARY.md' \
+      --exclude='INTEGRATION_GUIDE.md' \
+      --exclude='PENDING_STATUS_FEATURE.md' \
+      --exclude='SAFE_UNSAFE_COUNTS.md' \
+      --exclude='build-plugin.sh' \
+      --exclude='checksums.txt' \
       --exclude='*.zip' \
+      --exclude='*.log' \
+      --exclude='debug.log' \
+      --exclude='error.log' \
       "$PLUGIN_DIR/" "$BUILD_DIR/wp-image-guardian/"
 
 # Update version in plugin file (in case it changed)
@@ -155,11 +165,18 @@ if [ "$BUILD_MINIMAL" = true ]; then
     echo "Building minimal zip (without documentation)..."
     cd "$BUILD_DIR"
     
-    # Remove documentation files
+    # Remove documentation and development files
     rm -f wp-image-guardian/README.md
     rm -f wp-image-guardian/BUILD.md
     rm -f wp-image-guardian/INSTALLATION.md
     rm -f wp-image-guardian/TROUBLESHOOTING.md
+    rm -f wp-image-guardian/CLICKABLE_LINKS_UPDATE.md
+    rm -f wp-image-guardian/FIXES_SUMMARY.md
+    rm -f wp-image-guardian/INTEGRATION_GUIDE.md
+    rm -f wp-image-guardian/PENDING_STATUS_FEATURE.md
+    rm -f wp-image-guardian/SAFE_UNSAFE_COUNTS.md
+    rm -f wp-image-guardian/build-plugin.sh
+    rm -f wp-image-guardian/checksums.txt
     
     zip -r "$OUTPUT_FILE" wp-image-guardian/ \
         -x "*.git*" \
@@ -170,7 +187,14 @@ if [ "$BUILD_MINIMAL" = true ]; then
         -x "INSTALLATION.md" \
         -x "BUILD.md" \
         -x "TROUBLESHOOTING.md" \
-        -x "BUILD.txt" > /dev/null
+        -x "CLICKABLE_LINKS_UPDATE.md" \
+        -x "FIXES_SUMMARY.md" \
+        -x "INTEGRATION_GUIDE.md" \
+        -x "PENDING_STATUS_FEATURE.md" \
+        -x "SAFE_UNSAFE_COUNTS.md" \
+        -x "BUILD.txt" \
+        -x "build-plugin.sh" \
+        -x "checksums.txt" > /dev/null
     
     # Verify zip
     if ! unzip -l "$OUTPUT_FILE" | grep -q "wp-image-guardian/wp-image-guardian.php"; then
@@ -188,10 +212,17 @@ if [ "$BUILD_FULL_CHOICE" = true ] && [ "$BUILD_FULL" = true ]; then
     echo "Building full zip (with documentation)..."
     cd "$BUILD_DIR"
     
-    # Remove only build-specific files, keep README.md
+    # Remove only build-specific and development files, keep README.md
     rm -f wp-image-guardian/BUILD.md
     rm -f wp-image-guardian/INSTALLATION.md
     rm -f wp-image-guardian/TROUBLESHOOTING.md
+    rm -f wp-image-guardian/CLICKABLE_LINKS_UPDATE.md
+    rm -f wp-image-guardian/FIXES_SUMMARY.md
+    rm -f wp-image-guardian/INTEGRATION_GUIDE.md
+    rm -f wp-image-guardian/PENDING_STATUS_FEATURE.md
+    rm -f wp-image-guardian/SAFE_UNSAFE_COUNTS.md
+    rm -f wp-image-guardian/build-plugin.sh
+    rm -f wp-image-guardian/checksums.txt
     
     zip -r "$OUTPUT_FILE_FULL" wp-image-guardian/ \
         -x "*.git*" \
@@ -201,7 +232,14 @@ if [ "$BUILD_FULL_CHOICE" = true ] && [ "$BUILD_FULL" = true ]; then
         -x "BUILD.txt" \
         -x "BUILD.md" \
         -x "INSTALLATION.md" \
-        -x "TROUBLESHOOTING.md" > /dev/null
+        -x "TROUBLESHOOTING.md" \
+        -x "CLICKABLE_LINKS_UPDATE.md" \
+        -x "FIXES_SUMMARY.md" \
+        -x "INTEGRATION_GUIDE.md" \
+        -x "PENDING_STATUS_FEATURE.md" \
+        -x "SAFE_UNSAFE_COUNTS.md" \
+        -x "build-plugin.sh" \
+        -x "checksums.txt" > /dev/null
     
     # Verify zip
     if ! unzip -l "$OUTPUT_FILE_FULL" | grep -q "wp-image-guardian/wp-image-guardian.php"; then
