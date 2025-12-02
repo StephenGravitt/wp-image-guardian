@@ -6,29 +6,29 @@ if (!defined('ABSPATH')) {
 
 class WP_Image_Guardian {
     
-    private $oauth;
     private $api;
     private $admin;
     private $media;
     private $database;
     private $premium;
+    private $bulk_check;
     
     public function __construct() {
-        $this->oauth = new WP_Image_Guardian_OAuth();
         $this->api = new WP_Image_Guardian_API();
-        $this->admin = new WP_Image_Guardian_Admin();
-        $this->media = new WP_Image_Guardian_Media();
         $this->database = new WP_Image_Guardian_Database();
+        $this->media = new WP_Image_Guardian_Media();
+        $this->admin = new WP_Image_Guardian_Admin();
         $this->premium = new WP_Image_Guardian_Premium();
+        $this->bulk_check = new WP_Image_Guardian_Bulk_Check();
     }
     
     public function init() {
         // Initialize all components
-        $this->oauth->init();
         $this->api->init();
         $this->admin->init();
         $this->media->init();
         $this->premium->init();
+        $this->bulk_check->init();
         
         // Load text domain
         add_action('init', [$this, 'load_textdomain']);
@@ -42,9 +42,7 @@ class WP_Image_Guardian {
         add_action('wp_ajax_wp_image_guardian_get_results', [$this, 'ajax_get_results']);
         add_action('wp_ajax_wp_image_guardian_mark_safe', [$this, 'ajax_mark_safe']);
         add_action('wp_ajax_wp_image_guardian_mark_unsafe', [$this, 'ajax_mark_unsafe']);
-        add_action('wp_ajax_wp_image_guardian_oauth_callback', [$this, 'ajax_oauth_callback']);
-        add_action('wp_ajax_wp_image_guardian_disconnect', [$this, 'ajax_disconnect']);
-        add_action('wp_ajax_wp_image_guardian_get_usage_stats', [$this, 'ajax_get_usage_stats']);
+        add_action('wp_ajax_wp_image_guardian_get_remaining_searches', [$this, 'ajax_get_remaining_searches']);
         add_action('wp_ajax_wp_image_guardian_bulk_check', [$this, 'ajax_bulk_check']);
         add_action('wp_ajax_wp_image_guardian_auto_check', [$this, 'ajax_auto_check']);
         
@@ -61,10 +59,12 @@ class WP_Image_Guardian {
     }
     
     public function enqueue_admin_scripts($hook) {
-        // Only load on media pages and our settings page
+        // Load on media pages, attachment edit page, and our settings page
         if (strpos($hook, 'upload.php') !== false || 
             strpos($hook, 'media.php') !== false || 
-            strpos($hook, 'wp-image-guardian') !== false) {
+            strpos($hook, 'attachment') !== false ||
+            strpos($hook, 'wp-image-guardian') !== false ||
+            $hook === 'post.php') {
             
             wp_enqueue_script(
                 'wp-image-guardian-admin',
@@ -85,10 +85,10 @@ class WP_Image_Guardian {
             wp_localize_script('wp-image-guardian-admin', 'wpImageGuardian', [
                 'ajaxUrl' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('wp_image_guardian_nonce'),
-                'apiBaseUrl' => WP_IMAGE_GUARDIAN_API_BASE_URL,
                 'isPremium' => $this->premium->is_premium_user(),
                 'strings' => [
                     'checking' => __('Checking image...', 'wp-image-guardian'),
+                    'checked' => __('Checked', 'wp-image-guardian'),
                     'error' => __('Error checking image', 'wp-image-guardian'),
                     'safe' => __('Image is safe', 'wp-image-guardian'),
                     'unsafe' => __('Image may have copyright issues', 'wp-image-guardian'),
@@ -103,51 +103,50 @@ class WP_Image_Guardian {
     }
     
     public function ajax_check_image() {
-        // Verify nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
-            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+        // Verify security
+        $error = WP_Image_Guardian_Helpers::verify_ajax_request();
+        if ($error) {
+            wp_send_json_error($error['message']);
             return;
         }
         
-        // Check capabilities
-        if (!current_user_can('upload_files')) {
-            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+        // Validate attachment ID
+        $validation = WP_Image_Guardian_Helpers::validate_attachment_id(true);
+        if (!$validation['success']) {
+            wp_send_json_error($validation['message']);
             return;
         }
         
-        // Validate and sanitize attachment ID
-        if (!isset($_POST['attachment_id'])) {
-            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
+        $attachment_id = $validation['attachment_id'];
+        
+        // Check if image format is supported
+        $format_check = WP_Image_Guardian_Helpers::is_supported_image_format($attachment_id);
+        if (!$format_check['supported']) {
+            // Mark as reviewed so it's excluded from bulk checks
+            $this->database->mark_image_reviewed($attachment_id, 'unsupported_format');
+            wp_send_json_success([
+                'message' => sprintf(
+                    __('Unsupported image format (%s). Marked as checked (inconclusive).', 'wp-image-guardian'),
+                    $format_check['format']
+                ),
+                'risk_level' => 'unknown',
+                'user_decision' => null,
+                'total_results' => 0,
+            ]);
             return;
         }
         
-        $attachment_id = absint($_POST['attachment_id']);
-        if ($attachment_id <= 0) {
-            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
+        // Get image URL
+        $url_result = WP_Image_Guardian_Helpers::get_attachment_image_url($attachment_id);
+        if (!$url_result['success']) {
+            wp_send_json_error($url_result['message']);
             return;
         }
         
-        // Verify attachment exists and is an image
-        if (!wp_attachment_is_image($attachment_id)) {
-            wp_send_json_error(__('Invalid image attachment', 'wp-image-guardian'));
-            return;
-        }
-        
-        $image_url = wp_get_attachment_url($attachment_id);
-        if (!$image_url) {
-            wp_send_json_error(__('Invalid image URL', 'wp-image-guardian'));
-            return;
-        }
-        
-        $result = $this->api->check_image($image_url);
+        $result = $this->api->check_image($url_result['url']);
         
         if ($result['success']) {
-            // Store the result in database
-            $this->database->store_image_check($attachment_id, $result['data']);
-            
-            // Fire action hook
-            do_action('wp_image_guardian_image_checked', $attachment_id, $result['data']);
-            
+            WP_Image_Guardian_Helpers::process_image_check($attachment_id, $result, $this->database);
             wp_send_json_success($result['data']);
         } else {
             wp_send_json_error($result['message']);
@@ -155,197 +154,95 @@ class WP_Image_Guardian {
     }
     
     public function ajax_get_results() {
-        // Verify nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
-            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+        // Verify security
+        $error = WP_Image_Guardian_Helpers::verify_ajax_request();
+        if ($error) {
+            wp_send_json_error($error['message']);
             return;
         }
         
-        // Check capabilities
-        if (!current_user_can('upload_files')) {
-            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+        // Validate attachment ID
+        $validation = WP_Image_Guardian_Helpers::validate_attachment_id();
+        if (!$validation['success']) {
+            wp_send_json_error($validation['message']);
             return;
         }
         
-        // Validate and sanitize attachment ID
-        if (!isset($_POST['attachment_id'])) {
-            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
-            return;
-        }
-        
-        $attachment_id = absint($_POST['attachment_id']);
-        if ($attachment_id <= 0) {
-            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
-            return;
-        }
-        
-        // Verify attachment exists
-        if (!get_post($attachment_id)) {
-            wp_send_json_error(__('Attachment not found', 'wp-image-guardian'));
-            return;
-        }
-        
-        $results = $this->database->get_image_results($attachment_id);
-        
+        $results = $this->database->get_image_results($validation['attachment_id']);
         wp_send_json_success($results);
     }
     
     public function ajax_mark_safe() {
-        // Verify nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
-            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+        // Verify security
+        $error = WP_Image_Guardian_Helpers::verify_ajax_request();
+        if ($error) {
+            wp_send_json_error($error['message']);
             return;
         }
         
-        // Check capabilities
-        if (!current_user_can('upload_files')) {
-            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+        // Validate attachment ID
+        $validation = WP_Image_Guardian_Helpers::validate_attachment_id();
+        if (!$validation['success']) {
+            wp_send_json_error($validation['message']);
             return;
         }
         
-        // Validate and sanitize attachment ID
-        if (!isset($_POST['attachment_id'])) {
-            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
-            return;
-        }
-        
-        $attachment_id = absint($_POST['attachment_id']);
-        if ($attachment_id <= 0) {
-            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
-            return;
-        }
-        
-        // Verify attachment exists
-        if (!get_post($attachment_id)) {
-            wp_send_json_error(__('Attachment not found', 'wp-image-guardian'));
-            return;
-        }
-        
-        $this->database->mark_image_safe($attachment_id);
+        $this->database->mark_image_safe($validation['attachment_id']);
         
         // Fire action hook
-        do_action('wp_image_guardian_image_marked_safe', $attachment_id);
+        do_action('wp_image_guardian_image_marked_safe', $validation['attachment_id']);
         
         wp_send_json_success(__('Image marked as safe', 'wp-image-guardian'));
     }
     
     public function ajax_mark_unsafe() {
-        // Verify nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
-            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
+        // Verify security
+        $error = WP_Image_Guardian_Helpers::verify_ajax_request();
+        if ($error) {
+            wp_send_json_error($error['message']);
             return;
         }
         
-        // Check capabilities
-        if (!current_user_can('upload_files')) {
-            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+        // Validate attachment ID
+        $validation = WP_Image_Guardian_Helpers::validate_attachment_id();
+        if (!$validation['success']) {
+            wp_send_json_error($validation['message']);
             return;
         }
         
-        // Validate and sanitize attachment ID
-        if (!isset($_POST['attachment_id'])) {
-            wp_send_json_error(__('Missing attachment ID', 'wp-image-guardian'));
-            return;
-        }
-        
-        $attachment_id = absint($_POST['attachment_id']);
-        if ($attachment_id <= 0) {
-            wp_send_json_error(__('Invalid attachment ID', 'wp-image-guardian'));
-            return;
-        }
-        
-        // Verify attachment exists
-        if (!get_post($attachment_id)) {
-            wp_send_json_error(__('Attachment not found', 'wp-image-guardian'));
-            return;
-        }
-        
-        $this->database->mark_image_unsafe($attachment_id);
+        $this->database->mark_image_unsafe($validation['attachment_id']);
         
         // Fire action hook
-        do_action('wp_image_guardian_image_marked_unsafe', $attachment_id);
+        do_action('wp_image_guardian_image_marked_unsafe', $validation['attachment_id']);
         
         wp_send_json_success(__('Image marked as unsafe', 'wp-image-guardian'));
     }
     
-    public function ajax_oauth_callback() {
-        // Validate and sanitize OAuth callback parameters
-        if (!isset($_GET['code']) || !isset($_GET['state'])) {
-            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=error&message=' . urlencode(__('Missing OAuth parameters', 'wp-image-guardian'))));
-            exit;
+    public function ajax_get_remaining_searches() {
+        // Verify security
+        $error = WP_Image_Guardian_Helpers::verify_ajax_request();
+        if ($error) {
+            wp_send_json_error($error['message']);
+            return;
         }
         
-        $code = sanitize_text_field(wp_unslash($_GET['code']));
-        $state = sanitize_text_field(wp_unslash($_GET['state']));
+        $remaining = $this->api->get_remaining_searches();
         
-        // Validate code and state format (alphanumeric and common OAuth characters)
-        if (!preg_match('/^[a-zA-Z0-9\-_\.]+$/', $code) || !preg_match('/^[a-zA-Z0-9\-_\.]+$/', $state)) {
-            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=error&message=' . urlencode(__('Invalid OAuth parameters', 'wp-image-guardian'))));
-            exit;
-        }
-        
-        $result = $this->oauth->handle_callback($code, $state);
-        
-        if ($result['success']) {
-            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=success'));
+        if ($remaining['success']) {
+            wp_send_json_success([
+                'remaining_searches' => $remaining['remaining_searches']
+            ]);
         } else {
-            $error_message = isset($result['message']) ? sanitize_text_field($result['message']) : __('OAuth authentication failed', 'wp-image-guardian');
-            wp_safe_redirect(admin_url('upload.php?page=wp-image-guardian&oauth=error&message=' . urlencode($error_message)));
-        }
-        exit;
-    }
-    
-    public function ajax_disconnect() {
-        // Verify nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
-            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
-            return;
-        }
-        
-        // Check capabilities
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
-            return;
-        }
-        
-        $this->oauth->disconnect();
-        
-        wp_send_json_success(__('Disconnected from Image Guardian', 'wp-image-guardian'));
-    }
-    
-    public function ajax_get_usage_stats() {
-        // Verify nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
-            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
-            return;
-        }
-        
-        // Check capabilities
-        if (!current_user_can('upload_files')) {
-            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
-            return;
-        }
-        
-        $usage_stats = $this->api->get_usage_stats();
-        
-        if ($usage_stats['success']) {
-            wp_send_json_success($usage_stats['data']);
-        } else {
-            $error_message = isset($usage_stats['message']) ? sanitize_text_field($usage_stats['message']) : __('Failed to get usage stats', 'wp-image-guardian');
+            $error_message = $remaining['message'] ?? __('Failed to get remaining searches', 'wp-image-guardian');
             wp_send_json_error($error_message);
         }
     }
     
     public function ajax_bulk_check() {
-        // Verify nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
-            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
-            return;
-        }
-        
-        // Check capabilities
-        if (!current_user_can('upload_files')) {
-            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+        // Verify security
+        $error = WP_Image_Guardian_Helpers::verify_ajax_request();
+        if ($error) {
+            wp_send_json_error($error['message']);
             return;
         }
         
@@ -384,20 +281,27 @@ class WP_Image_Guardian {
                 continue;
             }
             
-            $image_url = wp_get_attachment_url($attachment_id);
-            if ($image_url) {
-                $result = $this->api->check_image($image_url);
+            // Check if image format is supported
+            $format_check = WP_Image_Guardian_Helpers::is_supported_image_format($attachment_id);
+            if (!$format_check['supported']) {
+                // Mark as reviewed so it's excluded from future bulk checks
+                $this->database->mark_image_reviewed($attachment_id, 'unsupported_format');
+                $results[] = ['id' => $attachment_id, 'status' => 'skipped', 'message' => sprintf(__('Unsupported format: %s', 'wp-image-guardian'), $format_check['format'])];
+                continue;
+            }
+            
+            $url_result = WP_Image_Guardian_Helpers::get_attachment_image_url($attachment_id);
+            if ($url_result['success']) {
+                $result = $this->api->check_image($url_result['url']);
                 if ($result['success']) {
-                    $this->database->store_image_check($attachment_id, $result['data']);
-                    // Fire action hook
-                    do_action('wp_image_guardian_image_checked', $attachment_id, $result['data']);
+                    WP_Image_Guardian_Helpers::process_image_check($attachment_id, $result, $this->database);
                     $results[] = ['id' => $attachment_id, 'status' => 'checked'];
                 } else {
-                    $error_message = isset($result['message']) ? sanitize_text_field($result['message']) : __('Check failed', 'wp-image-guardian');
+                    $error_message = $result['message'] ?? __('Check failed', 'wp-image-guardian');
                     $results[] = ['id' => $attachment_id, 'status' => 'error', 'message' => $error_message];
                 }
             } else {
-                $results[] = ['id' => $attachment_id, 'status' => 'error', 'message' => __('Invalid image URL', 'wp-image-guardian')];
+                $results[] = ['id' => $attachment_id, 'status' => 'error', 'message' => $url_result['message']];
             }
         }
         
@@ -405,15 +309,10 @@ class WP_Image_Guardian {
     }
     
     public function ajax_auto_check() {
-        // Verify nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wp_image_guardian_nonce')) {
-            wp_send_json_error(__('Security check failed', 'wp-image-guardian'));
-            return;
-        }
-        
-        // Check capabilities
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(__('Insufficient permissions', 'wp-image-guardian'));
+        // Verify security (requires manage_options)
+        $error = WP_Image_Guardian_Helpers::verify_ajax_request('manage_options');
+        if ($error) {
+            wp_send_json_error($error['message']);
             return;
         }
         
@@ -445,23 +344,47 @@ class WP_Image_Guardian {
     
     public function check_single_upload($attachment_id) {
         if (!$this->premium->is_premium_user()) {
+            delete_post_meta($attachment_id, '_wp_image_guardian_queued');
+            delete_post_meta($attachment_id, '_wp_image_guardian_queued_at');
             return;
         }
         
         $auto_check = get_option('wp_image_guardian_auto_check', false);
         if (!$auto_check) {
+            delete_post_meta($attachment_id, '_wp_image_guardian_queued');
+            delete_post_meta($attachment_id, '_wp_image_guardian_queued_at');
             return;
         }
         
-        $image_url = wp_get_attachment_url($attachment_id);
-        if ($image_url) {
-            $result = $this->api->check_image($image_url);
-            if ($result['success']) {
-                $this->database->store_image_check($attachment_id, $result['data']);
-                // Fire action hook
-                do_action('wp_image_guardian_image_checked', $attachment_id, $result['data']);
-            }
+        // Check if already checked (manual check may have been triggered)
+        $already_checked = get_post_meta($attachment_id, '_wp_image_guardian_checked', true);
+        if ($already_checked) {
+            // Clear queued flag since it's already checked
+            delete_post_meta($attachment_id, '_wp_image_guardian_queued');
+            delete_post_meta($attachment_id, '_wp_image_guardian_queued_at');
+            return;
         }
+        
+        // Check if image format is supported
+        $format_check = WP_Image_Guardian_Helpers::is_supported_image_format($attachment_id);
+        if (!$format_check['supported']) {
+            // Mark as reviewed so it's excluded from future bulk checks
+            $this->database->mark_image_reviewed($attachment_id, 'unsupported_format');
+            // Clear queued flag
+            delete_post_meta($attachment_id, '_wp_image_guardian_queued');
+            delete_post_meta($attachment_id, '_wp_image_guardian_queued_at');
+            return;
+        }
+        
+        $url_result = WP_Image_Guardian_Helpers::get_attachment_image_url($attachment_id);
+        if ($url_result['success']) {
+            $result = $this->api->check_image($url_result['url']);
+            WP_Image_Guardian_Helpers::process_image_check($attachment_id, $result, $this->database);
+        }
+        
+        // Clear queued flag after check completes
+        delete_post_meta($attachment_id, '_wp_image_guardian_queued');
+        delete_post_meta($attachment_id, '_wp_image_guardian_queued_at');
     }
     
     public function check_new_uploads() {
@@ -478,14 +401,18 @@ class WP_Image_Guardian {
         $unchecked_images = $this->database->get_unchecked_images(1);
         
         foreach ($unchecked_images as $image) {
-            $image_url = wp_get_attachment_url($image->ID);
-            if ($image_url) {
-                $result = $this->api->check_image($image_url);
-                if ($result['success']) {
-                    $this->database->store_image_check($image->ID, $result['data']);
-                    // Fire action hook
-                    do_action('wp_image_guardian_image_checked', $image->ID, $result['data']);
-                }
+            // Check if image format is supported
+            $format_check = WP_Image_Guardian_Helpers::is_supported_image_format($image->ID);
+            if (!$format_check['supported']) {
+                // Mark as reviewed so it's excluded from future bulk checks
+                $this->database->mark_image_reviewed($image->ID, 'unsupported_format');
+                continue;
+            }
+            
+            $url_result = WP_Image_Guardian_Helpers::get_attachment_image_url($image->ID);
+            if ($url_result['success']) {
+                $result = $this->api->check_image($url_result['url']);
+                WP_Image_Guardian_Helpers::process_image_check($image->ID, $result, $this->database);
             }
         }
     }
@@ -499,6 +426,10 @@ class WP_Image_Guardian {
         if (!$auto_check) {
             return;
         }
+        
+        // Mark as queued for checking
+        update_post_meta($attachment_id, '_wp_image_guardian_queued', time());
+        update_post_meta($attachment_id, '_wp_image_guardian_queued_at', current_time('mysql'));
         
         // Schedule immediate check for new uploads
         wp_schedule_single_event(time() + 30, 'wp_image_guardian_check_single_upload', [$attachment_id]);
