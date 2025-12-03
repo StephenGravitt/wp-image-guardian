@@ -22,6 +22,7 @@ class WP_Image_Guardian_Bulk_Check {
         add_action('wp_ajax_wp_image_guardian_start_bulk_check', [$this, 'ajax_start_bulk_check']);
         add_action('wp_ajax_wp_image_guardian_cancel_bulk_check', [$this, 'ajax_cancel_bulk_check']);
         add_action('wp_ajax_wp_image_guardian_get_bulk_progress', [$this, 'ajax_get_bulk_progress']);
+        add_action('wp_ajax_wp_image_guardian_reset_bulk_check', [$this, 'ajax_reset_bulk_check']);
         
         // Action hook for processing single image
         add_action('wp_image_guardian_process_single_image', [$this, 'process_single_image'], 10, 1);
@@ -112,9 +113,28 @@ class WP_Image_Guardian_Bulk_Check {
             return;
         }
         
+        // Auto-detect and fix stuck states
+        $this->detect_and_fix_stuck_state();
+        
         $progress = $this->get_progress();
         
         wp_send_json_success($progress);
+    }
+    
+    /**
+     * Reset bulk check state (force reset)
+     */
+    public function ajax_reset_bulk_check() {
+        // Verify security
+        $error = WP_Image_Guardian_Helpers::verify_ajax_request();
+        if ($error) {
+            wp_send_json_error($error['message']);
+            return;
+        }
+        
+        $this->force_reset_bulk_check();
+        
+        wp_send_json_success(__('Bulk check state reset', 'wp-image-guardian'));
     }
     
     /**
@@ -206,6 +226,52 @@ class WP_Image_Guardian_Bulk_Check {
         wp_clear_scheduled_hook('wp_image_guardian_process_single_image');
         delete_option('wp_image_guardian_bulk_queue');
         delete_option('wp_image_guardian_bulk_last_run');
+        
+        // Note: Keep progress option so user can see what was completed before cancellation
+    }
+    
+    /**
+     * Detect and fix stuck bulk check state
+     */
+    private function detect_and_fix_stuck_state() {
+        $status = get_option('wp_image_guardian_bulk_check_status', 'idle');
+        
+        // Only check if status is 'running' - don't touch completed/cancelled/idle states
+        if ($status !== 'running') {
+            return;
+        }
+        
+        $queue = get_option('wp_image_guardian_bulk_queue', []);
+        $has_scheduled = wp_next_scheduled('wp_image_guardian_process_single_image');
+        $last_run = floatval(get_option('wp_image_guardian_bulk_last_run', 0));
+        
+        // If queue is empty, no scheduled event, and last run was more than 5 minutes ago, consider it stuck
+        if (empty($queue) && !$has_scheduled) {
+            // Check if last run was more than 5 minutes ago (stuck)
+            if ($last_run > 0 && (microtime(true) - $last_run) > 300) {
+                // Auto-complete the stuck bulk check
+                update_option('wp_image_guardian_bulk_check_status', 'completed');
+                delete_option('wp_image_guardian_bulk_queue');
+                delete_option('wp_image_guardian_bulk_last_run');
+                wp_clear_scheduled_hook('wp_image_guardian_process_single_image');
+            } elseif ($last_run == 0) {
+                // Never ran, but queue is empty - mark as completed
+                update_option('wp_image_guardian_bulk_check_status', 'completed');
+                delete_option('wp_image_guardian_bulk_queue');
+                delete_option('wp_image_guardian_bulk_last_run');
+            }
+        }
+    }
+    
+    /**
+     * Force reset bulk check state
+     */
+    private function force_reset_bulk_check() {
+        update_option('wp_image_guardian_bulk_check_status', 'idle');
+        delete_option('wp_image_guardian_bulk_check_progress');
+        delete_option('wp_image_guardian_bulk_queue');
+        delete_option('wp_image_guardian_bulk_last_run');
+        wp_clear_scheduled_hook('wp_image_guardian_process_single_image');
     }
     
     /**

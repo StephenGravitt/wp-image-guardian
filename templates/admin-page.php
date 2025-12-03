@@ -208,6 +208,12 @@ $checked_percent = $total_media > 0 ? round(($checked_media / $total_media) * 10
                 <button type="button" id="cancel-bulk-check" class="button button-secondary" style="display: none;">
                     <?php _e('Cancel Bulk Check', 'wp-image-guardian'); ?>
                 </button>
+                <button type="button" id="reset-bulk-check" class="button button-secondary" style="display: none;">
+                    <?php _e('Cancel and Clear Queue', 'wp-image-guardian'); ?>
+                </button>
+            </p>
+            <p id="reset-bulk-check-help" class="description" style="display: none; color: #666; font-style: italic; margin-top: 5px;">
+                <?php _e('Use this button to stop the bulk generator at any time if it appears to be misbehaving or stuck. This will clear the queue and reset the bulk check state.', 'wp-image-guardian'); ?>
             </p>
             <div id="bulk-check-progress" style="display: none;">
                 <div class="progress-bar">
@@ -413,7 +419,7 @@ jQuery(document).ready(function($) {
     $('#start-bulk-check').on('click', function() {
         var button = $(this);
         
-        if (!confirm('<?php _e('Start bulk check? This will check all unchecked images.', 'wp-image-guardian'); ?>')) {
+        if (!confirm('<?php _e('Start bulk check? This will check only images that have not been checked yet.', 'wp-image-guardian'); ?>')) {
             return;
         }
         
@@ -461,6 +467,7 @@ jQuery(document).ready(function($) {
                 }
                 $('#start-bulk-check').prop('disabled', false).text('<?php _e('Start Bulk Check', 'wp-image-guardian'); ?>');
                 $('#cancel-bulk-check').hide();
+                $('#reset-bulk-check').hide();
                 alert('<?php _e('Bulk check cancelled', 'wp-image-guardian'); ?>');
                 location.reload();
             } else {
@@ -469,21 +476,94 @@ jQuery(document).ready(function($) {
         });
     });
     
+    // Cancel and clear queue (force stop bulk generator)
+    $('#reset-bulk-check').on('click', function() {
+        if (!confirm('<?php _e('Cancel and clear the bulk check queue? This will stop the bulk generator immediately and clear any pending items. Use this if the bulk generator appears to be stuck or misbehaving.', 'wp-image-guardian'); ?>')) {
+            return;
+        }
+        
+        $.post(ajaxurl, {
+            action: 'wp_image_guardian_reset_bulk_check',
+            nonce: '<?php echo wp_create_nonce('wp_image_guardian_nonce'); ?>'
+        }, function(response) {
+            if (response.success) {
+                if (bulkCheckInterval) {
+                    clearInterval(bulkCheckInterval);
+                    bulkCheckInterval = null;
+                }
+                $('#start-bulk-check').prop('disabled', false).text('<?php _e('Start Bulk Check', 'wp-image-guardian'); ?>');
+                $('#cancel-bulk-check').hide();
+                $('#reset-bulk-check').hide();
+                $('#reset-bulk-check-help').hide();
+                $('#bulk-check-progress').hide();
+                alert('<?php _e('Bulk check queue cleared successfully. You can now start a new bulk check.', 'wp-image-guardian'); ?>');
+                location.reload();
+            } else {
+                alert('Error: ' + response.data);
+            }
+        });
+    });
+    
+    // Track if we've already shown completion to prevent loops
+    var completionShown = false;
+    
     // Update bulk check progress
     function updateBulkCheckProgress() {
+        // Don't poll if we've already shown completion
+        if (completionShown) {
+            return;
+        }
+        
         $.post(ajaxurl, {
             action: 'wp_image_guardian_get_bulk_progress',
             nonce: '<?php echo wp_create_nonce('wp_image_guardian_nonce'); ?>'
         }, function(response) {
-            if (response.success) {
+            // Handle empty or malformed responses
+            if (!response || typeof response !== 'object') {
+                console.error('Invalid response from server');
+                return;
+            }
+            
+            if (response.success && response.data) {
                 var progress = response.data;
+                
+                // Ensure progress has required properties
+                if (!progress.status) {
+                    console.error('Missing status in progress data');
+                    return;
+                }
+                
                 var percent = progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
                 
-                $('#progress-current').text(progress.current);
-                $('#progress-total').text(progress.total);
+                $('#progress-current').text(progress.current || 0);
+                $('#progress-total').text(progress.total || 0);
                 $('.progress-fill').css('width', percent + '%');
                 
+                // Show reset button if stuck or if user might need to force stop
+                if (progress.status === 'running') {
+                    // Show reset button if stuck (remaining is 0 but status is running)
+                    // or if cancel button is already shown (make reset available as alternative)
+                    if ((progress.remaining === 0 && progress.current >= progress.total) || $('#cancel-bulk-check').is(':visible')) {
+                        $('#reset-bulk-check').show();
+                        $('#reset-bulk-check-help').show();
+                    } else {
+                        $('#reset-bulk-check').hide();
+                        $('#reset-bulk-check-help').hide();
+                    }
+                } else {
+                    $('#reset-bulk-check').hide();
+                    $('#reset-bulk-check-help').hide();
+                }
+                
+                // Handle completed or cancelled status
                 if (progress.status === 'completed' || progress.status === 'cancelled') {
+                    // Prevent multiple completion alerts
+                    if (completionShown) {
+                        return;
+                    }
+                    completionShown = true;
+                    
+                    // Clear all intervals immediately
                     if (bulkCheckInterval) {
                         clearInterval(bulkCheckInterval);
                         bulkCheckInterval = null;
@@ -491,38 +571,100 @@ jQuery(document).ready(function($) {
                     
                     $('#start-bulk-check').prop('disabled', false).text('<?php _e('Start Bulk Check', 'wp-image-guardian'); ?>');
                     $('#cancel-bulk-check').hide();
+                    $('#reset-bulk-check').hide();
+                    $('#reset-bulk-check-help').hide();
                     
                     if (progress.status === 'completed') {
                         alert('<?php _e('Bulk check completed!', 'wp-image-guardian'); ?>');
                         setTimeout(function() {
                             location.reload();
                         }, 2000);
+                    } else {
+                        // Cancelled - reload to refresh state
+                        setTimeout(function() {
+                            location.reload();
+                        }, 1000);
                     }
                 }
+            } else {
+                // Handle error response
+                console.error('Error response:', response);
+                // Don't show alert for errors, just log
+            }
+        }).fail(function(xhr, status, error) {
+            console.error('AJAX request failed:', status, error);
+            // Stop polling on repeated failures
+            if (bulkCheckInterval) {
+                clearInterval(bulkCheckInterval);
+                bulkCheckInterval = null;
             }
         });
     }
     
     // Check if bulk check is already running on page load
-    updateBulkCheckProgress();
     var initialCheck = setInterval(function() {
         $.post(ajaxurl, {
             action: 'wp_image_guardian_get_bulk_progress',
             nonce: '<?php echo wp_create_nonce('wp_image_guardian_nonce'); ?>'
         }, function(response) {
-            if (response.success && response.data.status === 'running') {
-                $('#start-bulk-check').prop('disabled', true).text('<?php _e('Running...', 'wp-image-guardian'); ?>');
-                $('#cancel-bulk-check').show();
-                $('#bulk-check-progress').show();
-                bulkCheckInterval = setInterval(function() {
-                    updateBulkCheckProgress();
-                }, 2000);
+            // Handle empty or malformed responses
+            if (!response || typeof response !== 'object') {
                 clearInterval(initialCheck);
-                updateBulkCheckProgress();
+                return;
+            }
+            
+            if (response.success && response.data) {
+                var progress = response.data;
+                
+                // Ensure progress has required properties
+                if (!progress.status) {
+                    clearInterval(initialCheck);
+                    return;
+                }
+                
+                // Only start polling if status is 'running'
+                if (progress.status === 'running') {
+                    $('#start-bulk-check').prop('disabled', true).text('<?php _e('Running...', 'wp-image-guardian'); ?>');
+                    $('#bulk-check-progress').show();
+                    
+                    // Show cancel button, and also show reset button as alternative
+                    $('#cancel-bulk-check').show();
+                    
+                    // Show reset button if stuck or as alternative to cancel
+                    if (progress.remaining === 0 && progress.current >= progress.total) {
+                        // Stuck state - show reset prominently
+                        $('#reset-bulk-check').show();
+                        $('#reset-bulk-check-help').show();
+                        $('#cancel-bulk-check').hide();
+                    } else {
+                        // Normal running - show both cancel and reset options
+                        $('#reset-bulk-check').show();
+                        $('#reset-bulk-check-help').show();
+                    }
+                    
+                    // Clear initial check and start regular polling
+                    clearInterval(initialCheck);
+                    bulkCheckInterval = setInterval(function() {
+                        updateBulkCheckProgress();
+                    }, 2000);
+                    updateBulkCheckProgress();
+                } else if (progress.status === 'completed' || progress.status === 'cancelled') {
+                    // Already completed/cancelled - don't start polling
+                    clearInterval(initialCheck);
+                    // Don't show alert on page load for completed status
+                } else {
+                    // Idle or other status - stop initial check
+                    clearInterval(initialCheck);
+                }
             } else {
+                // Error response - stop initial check
                 clearInterval(initialCheck);
             }
+        }).fail(function(xhr, status, error) {
+            console.error('Initial check failed:', status, error);
+            clearInterval(initialCheck);
         });
     }, 1000);
 });
 </script>
+

@@ -3,7 +3,7 @@
  * Plugin Name: WP Image Guardian
  * Plugin URI: https://imageguardian.com
  * Description: Protect your WordPress site from copyright issues with TinyEye reverse image search integration.
- * Version: 1.0.0
+ * Version: 1.0.2
  * Author: Image Guardian
  * Author URI: https://imageguardian.com
  * License: GPL v2 or later
@@ -21,7 +21,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('WP_IMAGE_GUARDIAN_VERSION', '1.0.0');
+define('WP_IMAGE_GUARDIAN_VERSION', '1.0.2');
 define('WP_IMAGE_GUARDIAN_PLUGIN_FILE', __FILE__);
 define('WP_IMAGE_GUARDIAN_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_IMAGE_GUARDIAN_PLUGIN_URL', plugin_dir_url(__FILE__));

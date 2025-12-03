@@ -198,6 +198,22 @@ For support and feature requests:
 
 ## Changelog
 
+### Version 1.0.2
+- Fixed infinite loop issue with bulk check progress polling
+- Added proper error handling for empty/malformed AJAX responses
+- Prevented duplicate completion alerts and page refresh loops
+- Improved interval management to properly clear polling when completed
+- Added response validation to prevent JavaScript errors from malformed data
+- Enhanced error logging for debugging AJAX communication issues
+
+### Version 1.0.1
+- Fixed bulk check stuck state detection and auto-recovery
+- Added "Cancel and Clear Queue" button for force-stopping bulk generator
+- Improved bulk check state management and error handling
+- Clarified bulk check warning message to indicate only unchecked images are processed
+- Enhanced bulk check progress tracking and stuck state detection
+- Added automatic cleanup of stuck bulk check processes
+
 ### Version 1.0.0
 - Initial release
 - Manual image checking
