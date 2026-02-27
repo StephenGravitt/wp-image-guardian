@@ -89,7 +89,58 @@ class WP_Image_Guardian_Database {
         global $wpdb;
         $wpdb->query("DROP TABLE IF EXISTS {$this->table_name}");
     }
-    
+
+    /**
+     * Sync post meta from the custom table for a given attachment.
+     * The custom table is the single source of truth — post meta is
+     * kept in sync for backward compatibility and easy per-post access.
+     */
+    public function sync_post_meta($attachment_id) {
+        global $wpdb;
+
+        $attachment_id = absint($attachment_id);
+        if ($attachment_id <= 0) {
+            return;
+        }
+
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT status, risk_level, match_percentage, results_count, results_data,
+                    user_decision, manual_risk_level, search_id, checked_at
+             FROM {$this->table_name} WHERE attachment_id = %d",
+            $attachment_id
+        ));
+
+        if (!$row) {
+            return;
+        }
+
+        update_post_meta($attachment_id, '_wp_image_guardian_checked', ($row->status === 'completed'));
+        update_post_meta($attachment_id, '_wp_image_guardian_checked_at', $row->checked_at);
+        update_post_meta($attachment_id, '_wp_image_guardian_risk_level', $row->risk_level);
+        update_post_meta($attachment_id, '_wp_image_guardian_match_percentage', $row->match_percentage);
+        update_post_meta($attachment_id, '_wp_image_guardian_total_results', intval($row->results_count));
+
+        if ($row->user_decision) {
+            update_post_meta($attachment_id, '_wp_image_guardian_user_decision', $row->user_decision);
+        } else {
+            delete_post_meta($attachment_id, '_wp_image_guardian_user_decision');
+        }
+
+        if ($row->manual_risk_level) {
+            update_post_meta($attachment_id, '_wp_image_guardian_manual_risk_level', $row->manual_risk_level);
+        }
+
+        if ($row->search_id) {
+            update_post_meta($attachment_id, '_wp_image_guardian_search_id', $row->search_id);
+        }
+
+        // Store full report from results_data
+        $results_data = json_decode($row->results_data, true);
+        if ($results_data) {
+            update_post_meta($attachment_id, '_wp_image_guardian_report', $results_data);
+        }
+    }
+
     public function store_image_check($attachment_id, $results) {
         global $wpdb;
         
@@ -189,39 +240,6 @@ class WP_Image_Guardian_Database {
             'checked_at' => current_time('mysql'),
         ];
         
-        // Store as post meta for easy access
-        // Full report (raw response from TinyEye)
-        // Debug: Log what we're storing
-        if (defined('WP_DEBUG') && WP_DEBUG && defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
-            error_log('[WP Image Guardian - store_image_check] Storing report to post meta: ' . print_r([
-                'results_keys' => is_array($results) ? array_keys($results) : 'not array',
-                'has_matches' => !empty($results['matches']),
-                'has_results' => !empty($results['results']),
-                'has_raw_response' => !empty($results['raw_response']),
-                'total_results' => $results['total_results'] ?? 'not set',
-            ], true));
-        }
-        update_post_meta($attachment_id, '_wp_image_guardian_report', $results);
-        
-        // Check status
-        update_post_meta($attachment_id, '_wp_image_guardian_checked', true);
-        update_post_meta($attachment_id, '_wp_image_guardian_checked_at', current_time('mysql'));
-        
-        // Risk level and score
-        update_post_meta($attachment_id, '_wp_image_guardian_risk_level', $risk_level);
-        update_post_meta($attachment_id, '_wp_image_guardian_match_percentage', $match_percentage);
-        update_post_meta($attachment_id, '_wp_image_guardian_total_results', $results_count);
-        
-        // User decision (safe/unsafe/null)
-        if ($user_decision) {
-            update_post_meta($attachment_id, '_wp_image_guardian_user_decision', $user_decision);
-        }
-        
-        // Store search ID if available
-        if ($search_id) {
-            update_post_meta($attachment_id, '_wp_image_guardian_search_id', $search_id);
-        }
-        
         // Debug logging
         if (defined('WP_DEBUG') && WP_DEBUG && defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
             error_log('[WP Image Guardian - store_image_check] Storing check for attachment: ' . $attachment_id);
@@ -253,22 +271,29 @@ class WP_Image_Guardian_Database {
                 error_log('[WP Image Guardian - store_image_check] Update result: ' . ($updated !== false ? 'success (rows: ' . $updated . ')' : 'failed - ' . $wpdb->last_error));
             }
             
-            return $updated !== false ? $existing->id : false;
+            $result_id = $updated !== false ? $existing->id : false;
         } else {
             $data['created_at'] = current_time('mysql');
             $data['updated_at'] = current_time('mysql');
             // Format: attachment_id, image_url, image_hash, search_id, status, results_count, results_data, risk_level, match_percentage, user_decision, checked_at, created_at, updated_at
             $inserted = $wpdb->insert($this->table_name, $data, ['%d', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%f', '%s', '%s', '%s', '%s']);
-            
+
             if (defined('WP_DEBUG') && WP_DEBUG && defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
                 error_log('[WP Image Guardian - store_image_check] Insert result: ' . ($inserted !== false ? 'success (ID: ' . $wpdb->insert_id . ')' : 'failed - ' . $wpdb->last_error));
                 if ($inserted === false) {
                     error_log('[WP Image Guardian - store_image_check] Last query: ' . $wpdb->last_query);
                 }
             }
-            
-            return $inserted !== false ? $wpdb->insert_id : false;
+
+            $result_id = $inserted !== false ? $wpdb->insert_id : false;
         }
+
+        // Sync post meta from the custom table (single source of truth)
+        if ($result_id !== false) {
+            $this->sync_post_meta($attachment_id);
+        }
+
+        return $result_id;
     }
     
     public function get_image_results($attachment_id) {
@@ -313,14 +338,14 @@ class WP_Image_Guardian_Database {
     
     public function mark_image_safe($attachment_id) {
         global $wpdb;
-        
+
         // Validate attachment ID
         $attachment_id = absint($attachment_id);
         if ($attachment_id <= 0) {
             return false;
         }
-        
-        // Update database
+
+        // Update database (single source of truth)
         $updated = $wpdb->update(
             $this->table_name,
             ['user_decision' => 'safe', 'updated_at' => current_time('mysql')],
@@ -328,23 +353,24 @@ class WP_Image_Guardian_Database {
             ['%s', '%s'],
             ['%d']
         );
-        
-        // Update post meta for easy access
-        update_post_meta($attachment_id, '_wp_image_guardian_user_decision', 'safe');
-        
+
+        if ($updated !== false) {
+            $this->sync_post_meta($attachment_id);
+        }
+
         return $updated !== false;
     }
-    
+
     public function mark_image_unsafe($attachment_id) {
         global $wpdb;
-        
+
         // Validate attachment ID
         $attachment_id = absint($attachment_id);
         if ($attachment_id <= 0) {
             return false;
         }
-        
-        // Update database
+
+        // Update database (single source of truth)
         $updated = $wpdb->update(
             $this->table_name,
             ['user_decision' => 'unsafe', 'updated_at' => current_time('mysql')],
@@ -352,10 +378,11 @@ class WP_Image_Guardian_Database {
             ['%s', '%s'],
             ['%d']
         );
-        
-        // Update post meta for easy access
-        update_post_meta($attachment_id, '_wp_image_guardian_user_decision', 'unsafe');
-        
+
+        if ($updated !== false) {
+            $this->sync_post_meta($attachment_id);
+        }
+
         return $updated !== false;
     }
     
@@ -406,16 +433,9 @@ class WP_Image_Guardian_Database {
             'updated_at' => current_time('mysql'),
         ];
         
-        // Store post meta so UI reflects checked/inconclusive state
-        update_post_meta($attachment_id, '_wp_image_guardian_checked', true);
-        update_post_meta($attachment_id, '_wp_image_guardian_checked_at', current_time('mysql'));
-        update_post_meta($attachment_id, '_wp_image_guardian_risk_level', 'unknown');
-        update_post_meta($attachment_id, '_wp_image_guardian_total_results', 0);
-        delete_post_meta($attachment_id, '_wp_image_guardian_user_decision');
-        
         if ($existing) {
             // Update existing record
-            return $wpdb->update(
+            $success = $wpdb->update(
                 $this->table_name,
                 $data,
                 ['attachment_id' => $attachment_id],
@@ -425,12 +445,18 @@ class WP_Image_Guardian_Database {
         } else {
             // Create new record
             $data['created_at'] = current_time('mysql');
-            return $wpdb->insert(
+            $success = $wpdb->insert(
                 $this->table_name,
                 $data,
                 ['%d', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s']
             ) !== false;
         }
+
+        if ($success) {
+            $this->sync_post_meta($attachment_id);
+        }
+
+        return $success;
     }
     
     public function get_unchecked_images($hours = 24) {
@@ -486,27 +512,42 @@ class WP_Image_Guardian_Database {
     
     public function get_risk_stats() {
         global $wpdb;
-        
+
         $stats = $wpdb->get_results(
-            "SELECT risk_level, COUNT(*) as count 
-             FROM {$this->table_name} 
-             WHERE status = 'completed' 
-             GROUP BY risk_level"
+            "SELECT
+                CASE
+                    WHEN risk_level = 'safe' THEN 'low'
+                    WHEN risk_level = 'warning' THEN 'medium'
+                    WHEN risk_level = 'danger' THEN 'high'
+                    ELSE risk_level
+                END as risk_level,
+                COUNT(*) as count
+             FROM {$this->table_name}
+             WHERE status = 'completed'
+             GROUP BY
+                CASE
+                    WHEN risk_level = 'safe' THEN 'low'
+                    WHEN risk_level = 'warning' THEN 'medium'
+                    WHEN risk_level = 'danger' THEN 'high'
+                    ELSE risk_level
+                END"
         );
-        
+
         $result = [
-            'safe' => 0,
-            'warning' => 0,
-            'danger' => 0,
+            'high' => 0,
+            'medium' => 0,
+            'low' => 0,
             'unknown' => 0,
             'total' => 0
         ];
-        
+
         foreach ($stats as $stat) {
-            $result[$stat->risk_level] = intval($stat->count);
+            if (isset($result[$stat->risk_level])) {
+                $result[$stat->risk_level] = intval($stat->count);
+            }
             $result['total'] += intval($stat->count);
         }
-        
+
         return $result;
     }
     
