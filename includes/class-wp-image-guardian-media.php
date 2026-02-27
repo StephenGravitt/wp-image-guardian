@@ -670,10 +670,14 @@ class WP_Image_Guardian_Media {
         </select>
         
         <?php
-        // Reviewed filter (hidden but functional for URL links)
+        // Reviewed filter
         $reviewed = isset($_GET['reviewed']) ? sanitize_text_field($_GET['reviewed']) : '';
         ?>
-        <input type="hidden" name="reviewed" value="<?php echo esc_attr($reviewed); ?>" />
+        <select name="reviewed" id="reviewed_filter">
+            <option value=""><?php _e('All Review Status', 'wp-image-guardian'); ?></option>
+            <option value="yes" <?php selected($reviewed, 'yes'); ?>><?php _e('Reviewed', 'wp-image-guardian'); ?></option>
+            <option value="no" <?php selected($reviewed, 'no'); ?>><?php _e('Not Reviewed', 'wp-image-guardian'); ?></option>
+        </select>
         
         <?php
         // Checked filter

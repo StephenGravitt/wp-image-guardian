@@ -126,10 +126,10 @@ $checked_percent = $total_media > 0 ? round(($checked_media / $total_media) * 10
                         $reviewed = $risk_breakdown[$level]['reviewed'] ?? 0;
                         $safe = $risk_breakdown[$level]['safe'] ?? 0;
                         $unsafe = $risk_breakdown[$level]['unsafe'] ?? 0;
-                        $filter_url = admin_url('upload.php?risk_level=' . $level);
-                        $reviewed_filter_url = admin_url('upload.php?risk_level=' . $level . '&reviewed=yes');
-                        $safe_filter_url = admin_url('upload.php?risk_level=' . $level . '&user_decision=safe');
-                        $unsafe_filter_url = admin_url('upload.php?risk_level=' . $level . '&user_decision=unsafe');
+                        $filter_url = admin_url('upload.php?mode=list&risk_level=' . $level);
+                        $reviewed_filter_url = admin_url('upload.php?mode=list&risk_level=' . $level . '&reviewed=yes');
+                        $safe_filter_url = admin_url('upload.php?mode=list&risk_level=' . $level . '&user_decision=safe');
+                        $unsafe_filter_url = admin_url('upload.php?mode=list&risk_level=' . $level . '&user_decision=unsafe');
                     ?>
                         <div class="risk-breakdown-box <?php echo esc_attr($info['class']); ?>">
                             <h4><?php echo esc_html($info['label']); ?></h4>
